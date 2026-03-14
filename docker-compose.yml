@@ -1,0 +1,15 @@
+services:
+  yt-dlp-webui:
+    build:
+      context: .
+      args:
+        YTDLP_VERSION: 2026.03.13
+    container_name: yt-dlp-webui
+    ports:
+      - "3000:3000"
+    volumes:
+      - yt_tmp:/app/tmp
+      - ./cookies:/app/cookies:ro
+    restart: unless-stopped
+volumes:
+  yt_tmp:

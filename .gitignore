@@ -1,0 +1,7 @@
+node_modules/
+tmp/
+cookies/*.txt
+cookies/*.cookies
+cookies/*.cookie
+.env
+npm-debug.log*
