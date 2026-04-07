@@ -193,7 +193,9 @@ function buildArgs({ url, format, quality, targetDir }) {
     '--yes-playlist',
     '--newline',
     '--restrict-filenames',
-    '--js-runtimes', 'node',
+    '--js-runtimes', 'deno',
+    '--remote-components', 'ejs:github',
+    '--extractor-args', 'youtube:player_client=android,web',
     '-P', targetDir,
     '-o', '%(title).200B [%(id)s].%(ext)s'
   ];
@@ -473,3 +475,6 @@ ensureDirs()
     console.error(err);
     process.exit(1);
   });
+
+
+

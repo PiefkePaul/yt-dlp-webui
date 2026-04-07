@@ -25,6 +25,28 @@ Danach im Browser oeffnen:
 http://localhost:3000
 ```
 
+## Container automatisch nach GitHub und Docker Hub veroeffentlichen
+
+Im Repo liegt jetzt ein GitHub-Actions-Workflow unter `.github/workflows/publish-container.yml`.
+
+Bei jedem Push auf `main` oder `master` sowie bei Tags wie `v1.0.0` wird das Docker-Image automatisch gebaut und in beide Registries gepusht:
+
+- `ghcr.io/<github-user-or-org>/yt-dlp-webui`
+- `docker.io/<dockerhub-user>/yt-dlp-webui`
+
+Damit Docker Hub funktioniert, musst du in deinem GitHub-Repository diese Secrets setzen:
+
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN`
+
+Empfehlung fuer Docker Hub:
+
+1. In Docker Hub ein Access Token erzeugen.
+2. Das Token als `DOCKERHUB_TOKEN` in GitHub hinterlegen.
+3. Deinen Docker-Hub-Benutzernamen als `DOCKERHUB_USERNAME` speichern.
+
+Danach reicht ein normaler Git-Push auf den Standard-Branch oder ein Versions-Tag, und das Image wird automatisch in beide Registries veroeffentlicht.
+
 ## Temporaeres Verhalten
 
 - Downloads landen pro Job in `/app/tmp/<job-id>`
