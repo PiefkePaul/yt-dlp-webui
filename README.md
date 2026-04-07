@@ -58,7 +58,7 @@ Der Workflow laeuft jeden Montag um `05:17 UTC` und macht Folgendes automatisch:
 - committet und pusht die Versionsaenderung nur dann, wenn sich wirklich etwas geaendert hat
 - baut danach direkt das neue Container-Image und pusht es nach GitHub Container Registry und Docker Hub
 
-Du kannst den Workflow in GitHub auch jederzeit manuell ueber `workflow_dispatch` starten.
+Du kannst den Workflow in GitHub auch jederzeit manuell ueber `workflow_dispatch` starten. Optional gibt es dort auch `force_publish`, falls du das aktuelle Image ohne Versionsaenderung noch einmal neu veroeffentlichen willst.
 
 ## Temporaeres Verhalten
 
