@@ -1,7 +1,7 @@
 ﻿FROM node:20-bookworm-slim
 
-ARG YTDLP_VERSION=2026.03.13
-ARG DENO_VERSION=2.6.4
+ARG YTDLP_VERSION=2026.03.17
+ARG DENO_VERSION=2.7.11
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl python3 unzip \
