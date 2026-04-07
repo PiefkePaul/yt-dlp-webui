@@ -47,6 +47,19 @@ Empfehlung fuer Docker Hub:
 
 Danach reicht ein normaler Git-Push auf den Standard-Branch oder ein Versions-Tag, und das Image wird automatisch in beide Registries veroeffentlicht.
 
+## Runtime-Versionen automatisch aktualisieren
+
+Zusaetzlich gibt es jetzt einen zweiten Workflow unter `.github/workflows/update-runtime-versions.yml`.
+
+Der Workflow laeuft jeden Montag um `05:17 UTC` und macht Folgendes automatisch:
+
+- holt die neuesten Releases von `yt-dlp` und `Deno`
+- aktualisiert `Dockerfile` und `docker-compose.yml`
+- committet und pusht die Versionsaenderung nur dann, wenn sich wirklich etwas geaendert hat
+- baut danach direkt das neue Container-Image und pusht es nach GitHub Container Registry und Docker Hub
+
+Du kannst den Workflow in GitHub auch jederzeit manuell ueber `workflow_dispatch` starten.
+
 ## Temporaeres Verhalten
 
 - Downloads landen pro Job in `/app/tmp/<job-id>`

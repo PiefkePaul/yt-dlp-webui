@@ -1,0 +1,168 @@
+name: Update Runtime Versions
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: yt-dlp-webui
+
+jobs:
+  update-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Fetch latest runtime versions
+        id: versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          urls = {
+              "ytdlp": "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest",
+              "deno": "https://api.github.com/repos/denoland/deno/releases/latest",
+          }
+          versions = {}
+          for key, url in urls.items():
+              request = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(request) as response:
+                  payload = json.load(response)
+              tag = payload["tag_name"]
+              if key == "deno" and tag.startswith("v"):
+                  tag = tag[1:]
+              versions[key] = tag
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"ytdlp_version={versions['ytdlp']}\n")
+              output.write(f"deno_version={versions['deno']}\n")
+
+          print(f"Latest yt-dlp: {versions['ytdlp']}")
+          print(f"Latest Deno: {versions['deno']}")
+          PY
+
+      - name: Update version files
+        id: update
+        env:
+          YTDLP_VERSION: ${{ steps.versions.outputs.ytdlp_version }}
+          DENO_VERSION: ${{ steps.versions.outputs.deno_version }}
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          root = pathlib.Path(".")
+          ytdlp = os.environ["YTDLP_VERSION"]
+          deno = os.environ["DENO_VERSION"]
+
+          dockerfile_path = root / "Dockerfile"
+          dockerfile = dockerfile_path.read_text(encoding="utf-8")
+          dockerfile = re.sub(r"^ARG YTDLP_VERSION=.*$", f"ARG YTDLP_VERSION={ytdlp}", dockerfile, flags=re.MULTILINE)
+          dockerfile = re.sub(r"^ARG DENO_VERSION=.*$", f"ARG DENO_VERSION={deno}", dockerfile, flags=re.MULTILINE)
+          dockerfile_path.write_text(dockerfile, encoding="utf-8")
+
+          compose_path = root / "docker-compose.yml"
+          compose_lines = compose_path.read_text(encoding="utf-8").splitlines()
+          ytdlp_index = None
+          ytdlp_indent = "        "
+          deno_found = False
+
+          for index, line in enumerate(compose_lines):
+              stripped = line.strip()
+              if stripped.startswith("YTDLP_VERSION:"):
+                  ytdlp_indent = line[: len(line) - len(line.lstrip())]
+                  compose_lines[index] = f"{ytdlp_indent}YTDLP_VERSION: {ytdlp}"
+                  ytdlp_index = index
+              elif stripped.startswith("DENO_VERSION:"):
+                  indent = line[: len(line) - len(line.lstrip())]
+                  compose_lines[index] = f"{indent}DENO_VERSION: {deno}"
+                  deno_found = True
+
+          if ytdlp_index is not None and not deno_found:
+              compose_lines.insert(ytdlp_index + 1, f"{ytdlp_indent}DENO_VERSION: {deno}")
+
+          compose_path.write_text("\n".join(compose_lines) + "\n", encoding="utf-8")
+          PY
+
+          if git diff --quiet -- Dockerfile docker-compose.yml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Git identity
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit version updates
+        if: steps.update.outputs.changed == 'true'
+        id: commit
+        env:
+          YTDLP_VERSION: ${{ steps.versions.outputs.ytdlp_version }}
+          DENO_VERSION: ${{ steps.versions.outputs.deno_version }}
+        run: |
+          git add Dockerfile docker-compose.yml
+          git commit -m "chore: update yt-dlp to ${YTDLP_VERSION} and deno to ${DENO_VERSION}"
+          git push origin HEAD:${{ github.event.repository.default_branch }}
+          echo "short_sha=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+          echo "full_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        if: steps.update.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: steps.update.outputs.changed == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: steps.update.outputs.changed == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push updated image
+        if: steps.update.outputs.changed == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:main
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:sha-${{ steps.commit.outputs.short_sha }}
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:ytdlp-${{ steps.versions.outputs.ytdlp_version }}
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:deno-${{ steps.versions.outputs.deno_version }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:main
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:sha-${{ steps.commit.outputs.short_sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:ytdlp-${{ steps.versions.outputs.ytdlp_version }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:deno-${{ steps.versions.outputs.deno_version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.commit.outputs.full_sha }}

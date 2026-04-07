@@ -4,6 +4,7 @@ services:
       context: .
       args:
         YTDLP_VERSION: 2026.03.13
+        DENO_VERSION: 2.6.4
     container_name: yt-dlp-webui
     ports:
       - "3000:3000"
