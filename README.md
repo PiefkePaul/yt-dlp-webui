@@ -1,29 +1,29 @@
-# yt-dlp Download-Server
+# yt-dlp Download Server
 
-Selbst hostbarer Download-Server fuer `yt-dlp` mit Weboberflaeche, Fortschrittsanzeige, MP3-/MP4-Ausgabe und temporaeren Download-Links fuer Einzelvideos und Playlists.
+A self-hostable download server for `yt-dlp` with a web interface, live progress updates, MP3/MP4 output, and temporary download links for single videos and playlists.
 
-Dieses Repository ist bewusst die eigentliche Server-App. Docker ist nur die optionale Verpackung derselben Anwendung, und GitHub Pages dient lediglich als statische Vorschau des Frontends.
+This repository is intentionally the actual server application. Docker is only an optional packaging layer for the same app, and GitHub Pages is only used as a static frontend preview.
 
-## Was die App kann
+## Features
 
-- Einzelvideos und Playlists ueber eine Weboberflaeche anstossen
-- Audio als MP3 oder Video als MP4 bereitstellen
-- Fortschritt und Log-Ausgabe live anzeigen
-- fertige Dateien direkt herunterladen
-- Playlists gesammelt als ZIP ausliefern
+- start single video and playlist downloads from the web interface
+- provide audio as MP3 or video as MP4
+- show live progress and log output
+- download finished files directly
+- bundle playlist results as ZIP archives
 
-## Schnellstart
+## Quick Start
 
-### Direkt auf dem System
+### Run Directly on Your System
 
-Voraussetzungen:
+Requirements:
 
-- Node.js 20 oder neuer
+- Node.js 20 or newer
 - `yt-dlp`
 - `ffmpeg`
 - `deno`
 
-Start:
+Start the server:
 
 ```bash
 cp .env.example .env
@@ -31,109 +31,113 @@ npm install
 npm start
 ```
 
-Danach ist die App unter `http://localhost:3000` erreichbar.
+The app will then be available at `http://localhost:3000`.
 
-Beim Start prueft der Server automatisch, ob `yt-dlp`, `ffmpeg` und `deno` im `PATH` vorhanden sind. Wenn etwas fehlt, bricht er mit einer klaren Fehlermeldung ab.
+On startup, the server automatically checks whether `yt-dlp`, `ffmpeg`, and `deno` are available in your `PATH`. If something is missing, it exits with a clear error message.
 
-### Fertiges Server-Paket aus GitHub Releases
+### Ready-to-Use Server Package from GitHub Releases
 
-Getaggte Versionen veroeffentlichen zusaetzlich ein ZIP-Paket in den GitHub Releases. Dieses Paket enthaelt die lauffaehige Server-App inklusive Node-Abhaengigkeiten. Du musst es nur entpacken, eine `.env` anlegen und den Server starten.
+Tagged versions also publish a ZIP package in GitHub Releases. This package contains the runnable server app including its Node dependencies. You only need to extract it, create a `.env` file, and start the server.
 
-Wichtig bleibt trotzdem:
+Still required on the target system:
 
-- Node.js muss auf dem Zielsystem vorhanden sein.
-- `yt-dlp`, `ffmpeg` und `deno` muessen weiterhin lokal installiert sein.
+- Node.js must be installed
+- `yt-dlp`, `ffmpeg`, and `deno` must still be installed locally
 
-## Konfiguration
+## Configuration
 
-Eine Beispielkonfiguration liegt in `.env.example`.
+An example configuration is available in `.env.example`.
 
-Wichtige Variablen:
+Important variables:
 
-- `PORT`: HTTP-Port des Servers
-- `TMP_DIR`: temporaeres Arbeitsverzeichnis fuer Downloads
-- `JOB_TTL_MS`: Aufbewahrungsdauer fertiger Downloads in Millisekunden
-- `YTDLP_COOKIES_FILE`: optionaler Pfad zu einer Cookies-Datei
-- `PUBLIC_API_BASE_URL`: optionale API-Basis fuer getrennte Frontend-/Backend-Deployments
-- `CORS_ALLOWED_ORIGINS`: kommaseparierte Origins fuer externe Frontends oder `*`
-- `PUBLIC_DEMO_MODE`: schaltet das Frontend in einen reinen Demo-Modus
-- `PUBLIC_DEMO_MESSAGE`: Text fuer die statische Vorschau
+- `PORT`: HTTP port used by the server
+- `TMP_DIR`: temporary working directory for downloads
+- `JOB_TTL_MS`: retention time for finished downloads in milliseconds
+- `YTDLP_COOKIES_FILE`: optional path to a cookies file
+- `PUBLIC_API_BASE_URL`: optional API base URL for separated frontend/backend deployments
+- `CORS_ALLOWED_ORIGINS`: comma-separated origins for external frontends or `*`
+- `PUBLIC_DEMO_MODE`: switches the frontend into demo-only mode
+- `PUBLIC_DEMO_MESSAGE`: message shown in the static preview
 
-FFmpeg / MP4-Encoding:
+FFmpeg / MP4 encoding:
 
-- `FFMPEG_HWACCEL=auto` nutzt Quick Sync automatisch, wenn verfuegbar
-- `FFMPEG_HWACCEL=qsv` bevorzugt Quick Sync explizit
-- `FFMPEG_HWACCEL=none` erzwingt Software-Encoding
-- `FFMPEG_MP4_HW_ENCODER=h264_qsv` waehlt den Hardware-Encoder
-- `FFMPEG_QSV_PRESET=medium` steuert das QSV-Preset
-- `FFMPEG_QSV_GLOBAL_QUALITY=23` steuert die Zielqualitaet fuer QSV
-- `FFMPEG_X264_PRESET=medium` und `FFMPEG_X264_CRF=23` steuern den Software-Fallback
-- `FFMPEG_AAC_BITRATE=192` steuert die AAC-Bitrate fuer MP4
+- `FFMPEG_HWACCEL=auto` uses Quick Sync automatically when available
+- `FFMPEG_HWACCEL=qsv` explicitly prefers Quick Sync
+- `FFMPEG_HWACCEL=none` forces software encoding
+- `FFMPEG_MP4_HW_ENCODER=h264_qsv` selects the hardware encoder
+- `FFMPEG_QSV_PRESET=medium` controls the QSV preset
+- `FFMPEG_QSV_GLOBAL_QUALITY=23` controls the target quality for QSV
+- `FFMPEG_X264_PRESET=medium` and `FFMPEG_X264_CRF=23` control the software fallback
+- `FFMPEG_AAC_BITRATE=192` controls the AAC bitrate for MP4
 
-Der Endpunkt `/health` zeigt die erkannte `ffmpeg`-Konfiguration inklusive aktivem MP4-Encoder an.
+The `/health` endpoint exposes the detected `ffmpeg` configuration, including the active MP4 encoder.
 
 ## Cookies
 
-Wenn fuer bestimmte Quellen eine Anmeldung noetig ist:
+If a source requires login data:
 
-- lege zum Beispiel `cookies/youtube.txt` an
-- setze `YTDLP_COOKIES_FILE=./cookies/youtube.txt`
-- die Datei muss im Netscape/Mozilla-Format vorliegen
+- create a file such as `cookies/youtube.txt`
+- set `YTDLP_COOKIES_FILE=./cookies/youtube.txt`
+- the file must use Netscape/Mozilla cookie format
 
-## Docker nur optional
+## Docker Is Optional
 
-Die Docker-Dateien liegen absichtlich gesammelt unter `docker/`, damit das Repository primaer die eigentliche Server-App abbildet.
+The Docker files intentionally live under `docker/` so the repository stays focused on the server app itself.
 
-Start mit Docker:
+Start with Docker:
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d --build
 ```
 
-Danach ist die App ebenfalls unter `http://localhost:3000` erreichbar.
+The app will then also be available at `http://localhost:3000`.
 
-Hinweise:
+Notes:
 
-- Docker bleibt nur eine Verpackung derselben Server-App.
-- Das Verhalten soll moeglichst nah am Direktbetrieb bleiben.
-- Fuer echtes Intel-QSV-Encoding musst du auf Linux in der Regel GPU-Zugriff beziehungsweise `/dev/dri` an den Container durchreichen.
+- Docker is only a packaging layer for the same server app
+- behavior is meant to stay as close as possible to direct hosting
+- for real Intel QSV encoding on Linux, you usually need to pass GPU access or `/dev/dri` into the container
 
 ## GitHub Pages Demo
 
-Das Frontend ist so vorbereitet, dass es spaeter auch getrennt vom Backend betrieben werden kann:
+The frontend is prepared so it can later be hosted separately from the backend:
 
-- API-Aufrufe koennen ueber `PUBLIC_API_BASE_URL` auf eine andere Domain zeigen
-- der Server kann ueber `CORS_ALLOWED_ORIGINS` externe Frontends gezielt erlauben
-- Download-Links werden domain-sicher aufgebaut
-- GitHub Pages zeigt aktuell nur eine statische Vorschau ohne aktive Download-Funktion
+- API requests can target another domain through `PUBLIC_API_BASE_URL`
+- the server can explicitly allow external frontends through `CORS_ALLOWED_ORIGINS`
+- download links are built in a domain-safe way
+- GitHub Pages currently shows only a static preview without active download functionality
 
-Wichtig:
+Live demo:
 
-- GitHub Pages reicht nicht fuer das echte Backend
-- fuer die produktive Funktion brauchst du spaeter einen Host mit Prozessausfuehrung und beschreibbarem Temp-Speicher
+- [GitHub Pages demo](https://piefkepaul.github.io/yt-dlp-webui/)
 
-## Bereitstellung
+Important:
 
-- GitHub bleibt die Quelle fuer den Server-Code
-- Docker Hub enthaelt den fertig nutzbaren Container
-- getaggte Versionen veroeffentlichen zusaetzlich ein serverfertiges ZIP in GitHub Releases
+- GitHub Pages is not enough for the real backend
+- production use still needs a host with process execution and writable temporary storage
 
-## NPM-Skripte
+## Distribution
 
-- `npm start`: startet den Server
-- `npm run check`: Syntax-Checks fuer Server, Frontend und Hilfsskripte
-- `npm run smoke`: kurzer Smoke-Test des Servers
-- `npm run pages:build`: baut die statische Demo nach `dist-pages/`
-- `npm run release:build`: baut das Release-ZIP nach `dist-release/`
-- `npm run verify`: fuehrt Check, Smoke-Test und Pages-Build zusammen aus
+- GitHub remains the source of truth for the server code
+- Docker Hub contains the ready-to-use container image
+- tagged versions additionally publish a ready-to-run server ZIP in GitHub Releases
 
-## Laufzeitverhalten
+## NPM Scripts
 
-- Downloads landen pro Job in `tmp/<job-id>` beziehungsweise im konfigurierten `TMP_DIR`
-- nach Abschluss ist die Datei nur befristet verfuegbar
-- standardmaessig werden Jobs nach 30 Minuten geloescht
-- beim Start werden alte temporaere Job-Dateien bereinigt
+- `npm start`: starts the server
+- `npm run check`: syntax checks for server, frontend, and helper scripts
+- `npm run smoke`: short smoke test for the server
+- `npm run pages:build`: builds the static demo into `dist-pages/`
+- `npm run release:build`: builds the release ZIP into `dist-release/`
+- `npm run verify`: runs check, smoke test, and Pages build together
 
-## Hinweis zur MP3-Erzeugung
+## Runtime Behavior
 
-MP3 wird nicht mehr durch den yt-dlp-Postprozessor erzeugt, sondern nach dem Download explizit mit FFmpeg konvertiert. Das ist robuster, wenn yt-dlp zwar Audio laden kann, aber der interne Postprocessing-Schritt zickt.
+- downloads are stored per job in `tmp/<job-id>` or the configured `TMP_DIR`
+- finished files remain available only for a limited time
+- jobs are deleted after 30 minutes by default
+- old temporary job files are cleaned up on startup
+
+## Note About MP3 Creation
+
+MP3 is no longer produced through the yt-dlp postprocessor. Instead, it is converted explicitly with FFmpeg after the download. That is more robust when yt-dlp can fetch the audio but its internal postprocessing step becomes unreliable.
