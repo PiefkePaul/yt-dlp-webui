@@ -1,6 +1,8 @@
 node_modules/
 tmp/
 dist-pages/
+dist-release/
+tmp-smoke/
 cookies/*.txt
 cookies/*.cookies
 cookies/*.cookie

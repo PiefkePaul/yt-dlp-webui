@@ -70,20 +70,20 @@ jobs:
           ytdlp = os.environ["YTDLP_VERSION"]
           deno = os.environ["DENO_VERSION"]
 
-          dockerfile_path = root / "Dockerfile"
+          dockerfile_path = root / "docker" / "Dockerfile"
           dockerfile = dockerfile_path.read_text(encoding="utf-8")
           dockerfile = re.sub(r"^ARG YTDLP_VERSION=.*$", f"ARG YTDLP_VERSION={ytdlp}", dockerfile, flags=re.MULTILINE)
           dockerfile = re.sub(r"^ARG DENO_VERSION=.*$", f"ARG DENO_VERSION={deno}", dockerfile, flags=re.MULTILINE)
           dockerfile_path.write_text(dockerfile, encoding="utf-8")
 
-          compose_path = root / "docker-compose.yml"
+          compose_path = root / "docker" / "docker-compose.yml"
           compose = compose_path.read_text(encoding="utf-8")
           compose = re.sub(r"YTDLP_VERSION:\s*.*", f"YTDLP_VERSION: {ytdlp}", compose)
           compose = re.sub(r"DENO_VERSION:\s*.*", f"DENO_VERSION: {deno}", compose)
           compose_path.write_text(compose, encoding="utf-8")
           PY
 
-          if git diff --quiet -- Dockerfile docker-compose.yml; then
+          if git diff --quiet -- docker/Dockerfile docker/docker-compose.yml; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -101,6 +101,6 @@ jobs:
           YTDLP_VERSION: ${{ steps.versions.outputs.ytdlp_version }}
           DENO_VERSION: ${{ steps.versions.outputs.deno_version }}
         run: |
-          git add Dockerfile docker-compose.yml
+          git add docker/Dockerfile docker/docker-compose.yml
           git commit -m "chore: update yt-dlp to ${YTDLP_VERSION} and deno to ${DENO_VERSION}"
           git push origin HEAD:${{ github.event.repository.default_branch }}

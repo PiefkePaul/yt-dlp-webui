@@ -1,9 +1,11 @@
 .git
 .github
+docker
 node_modules
 npm-debug.log
 cookies
 tmp
 dist-pages
+dist-release
 .env
 .env.local

@@ -1,7 +1,8 @@
 services:
   yt-dlp-webui:
     build:
-      context: .
+      context: ..
+      dockerfile: docker/Dockerfile
       args:
         YTDLP_VERSION: 2026.03.17
         DENO_VERSION: 2.7.12
@@ -24,7 +25,7 @@ services:
       FFMPEG_AAC_BITRATE: ${FFMPEG_AAC_BITRATE:-192}
     volumes:
       - yt_tmp:/app/tmp
-      - ./cookies:/app/cookies:ro
+      - ../cookies:/app/cookies:ro
     restart: unless-stopped
 volumes:
   yt_tmp:

@@ -49,7 +49,7 @@ async function main() {
     throw new Error('GET /app-config.js ist nicht registriert.');
   }
 
-  if (!indexHtml.includes('yt-dlp Webinterface')) {
+  if (!indexHtml.includes('yt-dlp Download-Server')) {
     throw new Error('Die Startseite enthaelt nicht den erwarteten Titel.');
   }
 
