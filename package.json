@@ -1,10 +1,14 @@
 {
   "name": "yt-dlp-webui",
   "version": "1.0.0",
-  "description": "Simple web UI for yt-dlp in Docker",
+  "description": "Self-hostable yt-dlp web UI with optional Docker packaging",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "check": "node --check server.js && node --check public/app.js && node --check scripts/build-pages.js && node --check scripts/smoke-test.js",
+    "smoke": "node scripts/smoke-test.js",
+    "pages:build": "node scripts/build-pages.js",
+    "verify": "npm run check && npm run smoke && npm run pages:build"
   },
   "dependencies": {
     "archiver": "^7.0.1",

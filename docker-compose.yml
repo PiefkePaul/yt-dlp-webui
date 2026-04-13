@@ -8,6 +8,20 @@ services:
     container_name: yt-dlp-webui
     ports:
       - "3000:3000"
+    environment:
+      PORT: 3000
+      TMP_DIR: /app/tmp
+      JOB_TTL_MS: ${JOB_TTL_MS:-1800000}
+      YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      FFMPEG_HWACCEL: ${FFMPEG_HWACCEL:-auto}
+      FFMPEG_MP4_HW_ENCODER: ${FFMPEG_MP4_HW_ENCODER:-h264_qsv}
+      FFMPEG_QSV_PRESET: ${FFMPEG_QSV_PRESET:-medium}
+      FFMPEG_QSV_GLOBAL_QUALITY: ${FFMPEG_QSV_GLOBAL_QUALITY:-23}
+      FFMPEG_X264_PRESET: ${FFMPEG_X264_PRESET:-medium}
+      FFMPEG_X264_CRF: ${FFMPEG_X264_CRF:-23}
+      FFMPEG_AAC_BITRATE: ${FFMPEG_AAC_BITRATE:-192}
     volumes:
       - yt_tmp:/app/tmp
       - ./cookies:/app/cookies:ro

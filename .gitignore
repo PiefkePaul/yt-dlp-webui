@@ -1,7 +1,9 @@
 node_modules/
 tmp/
+dist-pages/
 cookies/*.txt
 cookies/*.cookies
 cookies/*.cookie
 .env
+.env.local
 npm-debug.log*

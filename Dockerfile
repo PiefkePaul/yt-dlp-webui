@@ -1,4 +1,4 @@
-﻿FROM node:20-bookworm-slim
+FROM node:20-bookworm-slim
 
 ARG YTDLP_VERSION=2026.03.17
 ARG DENO_VERSION=2.7.12
@@ -19,8 +19,8 @@ RUN curl -L "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}
     && ffmpeg -version | head -n 1
 
 WORKDIR /app
-COPY package.json ./
-RUN npm install --omit=dev
+COPY package*.json ./
+RUN npm ci --omit=dev
 COPY . .
 
 EXPOSE 3000

@@ -3,8 +3,8 @@ name: Publish Container
 on:
   push:
     branches:
-      - master
       - main
+      - master
     tags:
       - "v*"
   workflow_dispatch:

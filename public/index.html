@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
@@ -15,6 +15,8 @@
       --accent: #22c55e;
       --accent-2: #16a34a;
       --danger: #ef4444;
+      --warning: #f59e0b;
+      --info: #38bdf8;
       --border: #334155;
     }
     * { box-sizing: border-box; }
@@ -34,17 +36,11 @@
       border: 1px solid var(--border);
       border-radius: 20px;
       padding: 24px;
-      box-shadow: 0 20px 60px rgba(0,0,0,.35);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
       backdrop-filter: blur(10px);
     }
     h1 { margin-top: 0; font-size: 1.8rem; }
     p { color: var(--muted); }
-    .row {
-      display: grid;
-      grid-template-columns: 1.8fr 0.8fr 0.8fr auto;
-      gap: 12px;
-      align-items: center;
-    }
     input, select, button, textarea {
       width: 100%;
       border-radius: 12px;
@@ -70,32 +66,49 @@
       justify-content: center;
       align-items: center;
     }
-    button.ghost {
-      background: transparent;
-      color: var(--muted);
-      border: 1px solid var(--border);
-      min-width: 0;
-      width: auto;
-      padding: 10px 12px;
+    button:disabled { opacity: 0.65; cursor: wait; }
+    textarea {
+      min-height: 220px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
     }
-    button:disabled { opacity: .65; cursor: wait; }
     .stack { display: grid; gap: 16px; }
+    .row {
+      display: grid;
+      grid-template-columns: 1.8fr 0.8fr 0.8fr auto;
+      gap: 12px;
+      align-items: center;
+    }
     .status {
       border: 1px solid var(--border);
       background: rgba(15, 23, 42, 0.8);
       border-radius: 16px;
       padding: 16px;
     }
+    .banner {
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.9);
+      padding: 14px 16px;
+    }
+    .banner.warning {
+      border-color: rgba(245, 158, 11, 0.4);
+      background: rgba(120, 53, 15, 0.2);
+    }
+    .banner.info {
+      border-color: rgba(56, 189, 248, 0.35);
+      background: rgba(14, 116, 144, 0.18);
+    }
     .hidden { display: none; }
     .ok { color: #86efac; }
     .error { color: #fca5a5; }
     .muted { color: var(--muted); font-size: 0.95rem; }
-    textarea {
-      min-height: 220px;
-      resize: vertical;
-      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    .footer {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
     }
-    .footer { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
     .progress-wrap { display: grid; gap: 8px; }
     .progress-meta {
       display: flex;
@@ -146,9 +159,16 @@
   <main class="card stack">
     <div>
       <h1>yt-dlp Webinterface</h1>
+      <p>Die App laeuft als normaler Node-Server und kann optional in Docker verpackt werden.</p>
       <p>Standardmaessig wird MP3 in hoher Qualitaet geladen. Bei Playlists wird nach Abschluss automatisch eine ZIP-Datei zum Download bereitgestellt.</p>
-      <p>Downloads stehen nach Fertigstellung nur temporaer zur Verfuegung und werden spaeter automatisch entfernt.</p>
     </div>
+
+    <section id="modeBanner" class="banner hidden">
+      <strong>Betriebsmodus</strong>
+      <div id="modeBannerText" class="muted"></div>
+    </section>
+
+    <div id="apiInfo" class="muted hidden"></div>
 
     <form id="downloadForm" class="stack">
       <div class="row">
@@ -192,176 +212,7 @@
     </section>
   </main>
 
-  <script>
-    const qualityMap = {
-      mp3: [
-        { value: '320', label: 'Hoechste Qualitaet (320 kbps)' },
-        { value: '192', label: '192 kbps' },
-        { value: '128', label: '128 kbps' }
-      ],
-      mp4: [
-        { value: 'best', label: 'Beste verfuegbare Qualitaet' },
-        { value: '1080', label: '1080p' },
-        { value: '720', label: '720p' },
-        { value: '480', label: '480p' }
-      ]
-    };
-
-    const stageLabels = {
-      queued: 'Wartet auf Start...',
-      analyze: 'Link und Formate werden analysiert...',
-      download: 'Datei wird heruntergeladen...',
-      convert: 'Datei wird konvertiert...',
-      pack: 'Dateien werden gebuendelt...',
-      done: 'Fertig.',
-      error: 'Fehler aufgetreten.'
-    };
-
-    const form = document.getElementById('downloadForm');
-    const formatSelect = document.getElementById('format');
-    const qualitySelect = document.getElementById('quality');
-    const statusBox = document.getElementById('statusBox');
-    const stateText = document.getElementById('stateText');
-    const stageText = document.getElementById('stageText');
-    const progressText = document.getElementById('progressText');
-    const progressBar = document.getElementById('progressBar');
-    const expiryText = document.getElementById('expiryText');
-    const summaryLog = document.getElementById('summaryLog');
-    const detailsBox = document.getElementById('detailsBox');
-    const logArea = document.getElementById('log');
-    const downloadLink = document.getElementById('downloadLink');
-    const fileName = document.getElementById('fileName');
-    const submitBtn = document.getElementById('submitBtn');
-
-    function fillQualityOptions(format) {
-      qualitySelect.innerHTML = '';
-      for (const option of qualityMap[format]) {
-        const el = document.createElement('option');
-        el.value = option.value;
-        el.textContent = option.label;
-        qualitySelect.appendChild(el);
-      }
-      if (format === 'mp3') qualitySelect.value = '320';
-      if (format === 'mp4') qualitySelect.value = 'best';
-    }
-
-    function formatDate(value) {
-      if (!value) return '';
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return '';
-
-      return new Intl.DateTimeFormat('de-DE', {
-        dateStyle: 'medium',
-        timeStyle: 'medium'
-      }).format(date);
-    }
-
-    function updateExpiryText(expiresAt) {
-      const formatted = formatDate(expiresAt);
-      if (!formatted) {
-        expiryText.textContent = '';
-        expiryText.classList.add('hidden');
-        return;
-      }
-
-      expiryText.textContent = `Verfuegbar bis: ${formatted}`;
-      expiryText.classList.remove('hidden');
-    }
-
-    function updateProgress(progress, stage) {
-      const safeProgress = Math.max(0, Math.min(100, Number(progress) || 0));
-      progressBar.style.width = `${safeProgress}%`;
-      progressText.textContent = `${Math.round(safeProgress)}%`;
-      stageText.textContent = stageLabels[stage] || 'Verarbeitung...';
-    }
-
-
-    function getCurrentSummary(logText) {
-      if (!logText) return 'Noch keine Aktivitaet.';
-
-      const lines = logText
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-
-      return lines[lines.length - 1] || 'Noch keine Aktivitaet.';
-    }
-    function resetStatusBox() {
-      stateText.textContent = 'Download wird gestartet...';
-      updateProgress(0, 'queued');
-      updateExpiryText(null);
-      summaryLog.textContent = 'Noch keine Aktivitaet.';
-      logArea.value = '';
-      logArea.scrollTop = 0;
-      detailsBox.open = false;
-      downloadLink.classList.add('hidden');
-      fileName.textContent = '';
-    }
-
-    fillQualityOptions('mp3');
-    formatSelect.addEventListener('change', () => fillQualityOptions(formatSelect.value));
-
-    async function pollStatus(id) {
-      const response = await fetch(`/api/status/${id}`);
-      if (!response.ok) throw new Error('Status konnte nicht geladen werden.');
-      const data = await response.json();
-
-      logArea.value = data.rawLog || '';
-      logArea.scrollTop = logArea.scrollHeight;
-      summaryLog.textContent = getCurrentSummary(data.log);
-      updateExpiryText(data.expiresAt);
-      updateProgress(data.progress, data.stage);
-
-      if (data.status === 'running') {
-        stateText.textContent = 'Verarbeitung laeuft...';
-        setTimeout(() => pollStatus(id), 1500);
-        return;
-      }
-
-      if (data.status === 'done') {
-        stateText.innerHTML = '<span class="ok">Download abgeschlossen.</span>';
-        updateProgress(100, 'done');
-        downloadLink.href = data.downloadUrl;
-        downloadLink.classList.remove('hidden');
-        fileName.textContent = data.downloadName || '';
-        submitBtn.disabled = false;
-        return;
-      }
-
-      stateText.innerHTML = `<span class="error">Fehler: ${data.error || 'Unbekannt'}</span>`;
-      updateProgress(data.progress || 100, 'error');
-      submitBtn.disabled = false;
-    }
-
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      submitBtn.disabled = true;
-      statusBox.classList.remove('hidden');
-      resetStatusBox();
-
-      try {
-        const response = await fetch('/api/download', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: document.getElementById('url').value,
-            format: formatSelect.value,
-            quality: qualitySelect.value
-          })
-        });
-
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Download konnte nicht gestartet werden.');
-        await pollStatus(data.id);
-      } catch (error) {
-        stateText.innerHTML = `<span class="error">${error.message}</span>`;
-        updateProgress(100, 'error');
-        submitBtn.disabled = false;
-      }
-    });
-  </script>
+  <script src="./app-config.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
-
-
-

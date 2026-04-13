@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
@@ -6,33 +6,350 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const archiver = require('archiver');
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-const TMP_DIR = process.env.TMP_DIR || path.join(__dirname, 'tmp');
-const JOB_TTL_MS = Number(process.env.JOB_TTL_MS || 30 * 60 * 1000); // 30 minutes
+const DEFAULT_PORT = Number(process.env.PORT || 3000);
+const DEFAULT_TMP_DIR = resolvePathValue(process.env.TMP_DIR || path.join(__dirname, 'tmp'));
+const JOB_TTL_MS = Number(process.env.JOB_TTL_MS || 30 * 60 * 1000);
+const YTDLP_COOKIES_FILE = process.env.YTDLP_COOKIES_FILE
+  ? resolvePathValue(process.env.YTDLP_COOKIES_FILE)
+  : '';
+
+const PUBLIC_API_BASE_URL = normalizeBaseUrl(process.env.PUBLIC_API_BASE_URL || '');
+const PUBLIC_DEMO_MODE = normalizeBoolean(process.env.PUBLIC_DEMO_MODE, false);
+const PUBLIC_DEMO_MESSAGE = (process.env.PUBLIC_DEMO_MESSAGE || '').trim()
+  || 'Diese Seite ist aktuell nur eine statische Vorschau ohne angebundenes Backend.';
+const CORS_ALLOWED_ORIGINS = parseAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS);
+const SKIP_RUNTIME_CHECKS = normalizeBoolean(process.env.SKIP_RUNTIME_CHECKS, false);
+const SKIP_FFMPEG_PROBE = normalizeBoolean(process.env.SKIP_FFMPEG_PROBE, false);
+
+const FFMPEG_HWACCEL = normalizeHwAccelPreference(process.env.FFMPEG_HWACCEL);
+const FFMPEG_MP4_HW_ENCODER = (process.env.FFMPEG_MP4_HW_ENCODER || 'h264_qsv').trim().toLowerCase();
+const FFMPEG_QSV_PRESET = (process.env.FFMPEG_QSV_PRESET || 'medium').trim().toLowerCase();
+const FFMPEG_QSV_GLOBAL_QUALITY = sanitizeInteger(process.env.FFMPEG_QSV_GLOBAL_QUALITY, 23, 1, 51);
+const FFMPEG_X264_PRESET = (process.env.FFMPEG_X264_PRESET || 'medium').trim().toLowerCase();
+const FFMPEG_X264_CRF = sanitizeInteger(process.env.FFMPEG_X264_CRF, 23, 0, 51);
+const FFMPEG_AAC_BITRATE = sanitizeInteger(process.env.FFMPEG_AAC_BITRATE, 192, 32, 320);
 
 const FFMPEG_DURATION_RE = /Duration:\s+(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/;
 const FFMPEG_TIME_RE = /time=(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/;
 const YTDLP_PERCENT_RE = /\[download\]\s+(\d+(?:\.\d+)?)%/;
 
+const app = express();
+const jobs = new Map();
+
+const runtimeState = {
+  tmpDir: DEFAULT_TMP_DIR,
+  jobTtlMs: JOB_TTL_MS,
+  runtimeChecksSkipped: SKIP_RUNTIME_CHECKS,
+  ffmpegProbeSkipped: SKIP_FFMPEG_PROBE
+};
+
+let ffmpegRuntime = createDefaultFfmpegRuntime();
+
+app.set('trust proxy', true);
+app.use(createCorsMiddleware());
 app.use(express.json());
+app.get('/app-config.js', (_req, res) => {
+  res.type('application/javascript');
+  res.send(`window.APP_CONFIG = ${JSON.stringify(buildPublicClientConfig(), null, 2)};\n`);
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
-const jobs = new Map();
+function sanitizeInteger(value, fallback, min, max) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(parsed)));
+}
+
+function normalizeBoolean(value, fallback) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
+function normalizeBaseUrl(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return '';
+  return normalized.endsWith('/') ? normalized : `${normalized}/`;
+}
+
+function normalizeHwAccelPreference(value) {
+  const normalized = String(value || 'auto').trim().toLowerCase();
+  return ['auto', 'none', 'qsv'].includes(normalized) ? normalized : 'auto';
+}
+
+function resolvePathValue(value) {
+  if (!value) return '';
+  return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
+}
+
+function parseAllowedOrigins(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return [];
+  if (normalized === '*') return ['*'];
+  return normalized.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function appendVary(currentValue, value) {
+  const values = String(currentValue || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (!values.includes(value)) {
+    values.push(value);
+  }
+
+  return values.join(', ');
+}
+
+function createCorsMiddleware() {
+  return (req, res, next) => {
+    const origin = req.get('origin');
+    const allowedOrigin = resolveAllowedOrigin(origin);
+
+    if (allowedOrigin) {
+      res.set('Access-Control-Allow-Origin', allowedOrigin);
+      res.set('Access-Control-Allow-Headers', 'Content-Type');
+      res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+      if (allowedOrigin !== '*') {
+        res.set('Vary', appendVary(res.get('Vary'), 'Origin'));
+      }
+    }
+
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
+
+    next();
+  };
+}
+
+function resolveAllowedOrigin(origin) {
+  if (!origin || CORS_ALLOWED_ORIGINS.length === 0) {
+    return null;
+  }
+
+  if (CORS_ALLOWED_ORIGINS.includes('*')) {
+    return '*';
+  }
+
+  return CORS_ALLOWED_ORIGINS.includes(origin) ? origin : null;
+}
+
+function buildPublicClientConfig() {
+  return {
+    apiBaseUrl: PUBLIC_API_BASE_URL ? PUBLIC_API_BASE_URL.replace(/\/$/, '') : '',
+    demoMode: PUBLIC_DEMO_MODE,
+    demoMessage: PUBLIC_DEMO_MESSAGE
+  };
+}
+
+function getSoftwareMp4TranscodeProfile() {
+  return {
+    mode: 'software',
+    label: 'Software (libx264)',
+    videoCodec: 'libx264',
+    videoArgs: [
+      '-preset', FFMPEG_X264_PRESET,
+      '-crf', String(FFMPEG_X264_CRF),
+      '-pix_fmt', 'yuv420p'
+    ],
+    audioCodec: 'aac',
+    audioArgs: ['-b:a', `${FFMPEG_AAC_BITRATE}k`]
+  };
+}
+
+function getQuickSyncMp4TranscodeProfile() {
+  return {
+    mode: 'qsv',
+    label: `Intel Quick Sync (${FFMPEG_MP4_HW_ENCODER})`,
+    videoCodec: FFMPEG_MP4_HW_ENCODER,
+    videoArgs: [
+      '-preset', FFMPEG_QSV_PRESET,
+      '-global_quality', String(FFMPEG_QSV_GLOBAL_QUALITY)
+    ],
+    audioCodec: 'aac',
+    audioArgs: ['-b:a', `${FFMPEG_AAC_BITRATE}k`]
+  };
+}
+
+function createDefaultFfmpegRuntime() {
+  return {
+    version: null,
+    hwaccels: [],
+    encoders: [],
+    quickSyncDetected: false,
+    quickSyncAvailable: false,
+    requestedHwAccel: FFMPEG_HWACCEL,
+    preferredMp4Profile: getSoftwareMp4TranscodeProfile(),
+    probeError: null,
+    quickSyncProbeError: null,
+    probedAt: null
+  };
+}
+
+function parseFfmpegHwaccels(text) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim().toLowerCase())
+    .filter((line) => /^[a-z0-9_]+$/.test(line) && line !== 'hardware acceleration methods:');
+}
+
+function parseFfmpegEncoders(text) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => {
+      const match = line.match(/^\s*[A-Z.]{6}\s+([^\s]+)/);
+      return match ? match[1].toLowerCase() : null;
+    })
+    .filter(Boolean);
+}
+
+function resolvePreferredMp4TranscodeProfile(runtime) {
+  if (FFMPEG_HWACCEL === 'none') {
+    return getSoftwareMp4TranscodeProfile();
+  }
+
+  if (runtime.quickSyncAvailable) {
+    return getQuickSyncMp4TranscodeProfile();
+  }
+
+  return getSoftwareMp4TranscodeProfile();
+}
+
+async function runProcessCapture(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args);
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (buffer) => {
+      stdout += buffer.toString();
+    });
+
+    child.stderr.on('data', (buffer) => {
+      stderr += buffer.toString();
+    });
+
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr, combined: `${stdout}${stderr}` });
+        return;
+      }
+
+      reject(new Error(`${command} ${args.join(' ')} fehlgeschlagen (Exit-Code ${code}).`));
+    });
+  });
+}
+
+async function verifyRequiredBinaries() {
+  const binaries = [
+    {
+      command: 'yt-dlp',
+      args: ['--version'],
+      hint: 'Installiere yt-dlp und stelle sicher, dass `yt-dlp` im PATH liegt.'
+    },
+    {
+      command: 'ffmpeg',
+      args: ['-hide_banner', '-version'],
+      hint: 'Installiere FFmpeg und stelle sicher, dass `ffmpeg` im PATH liegt.'
+    },
+    {
+      command: 'deno',
+      args: ['--version'],
+      hint: 'Installiere Deno oder entferne die Abhaengigkeit in den yt-dlp-JS-Runtime-Optionen.'
+    }
+  ];
+
+  const missing = [];
+
+  for (const binary of binaries) {
+    try {
+      await runProcessCapture(binary.command, binary.args);
+    } catch (error) {
+      missing.push({
+        command: binary.command,
+        hint: binary.hint,
+        error: error.message
+      });
+    }
+  }
+
+  if (missing.length === 0) {
+    return;
+  }
+
+  const message = [
+    'Fehlende Runtime-Abhaengigkeiten erkannt:',
+    ...missing.map((item) => `- ${item.command}: ${item.hint} (${item.error})`),
+    '',
+    'Du kannst alternativ weiterhin Docker verwenden; dort werden die benoetigten Binaries beim Image-Build installiert.'
+  ].join('\n');
+
+  throw new Error(message);
+}
+
+async function probeFfmpegRuntime() {
+  const runtime = createDefaultFfmpegRuntime();
+  runtime.probedAt = new Date().toISOString();
+
+  try {
+    const versionResult = await runProcessCapture('ffmpeg', ['-hide_banner', '-version']);
+    runtime.version = versionResult.combined.split(/\r?\n/).find(Boolean)?.trim() || null;
+
+    const hwaccelsResult = await runProcessCapture('ffmpeg', ['-hide_banner', '-hwaccels']);
+    runtime.hwaccels = parseFfmpegHwaccels(hwaccelsResult.combined);
+
+    const encodersResult = await runProcessCapture('ffmpeg', ['-hide_banner', '-encoders']);
+    runtime.encoders = parseFfmpegEncoders(encodersResult.combined);
+    runtime.quickSyncDetected = runtime.hwaccels.includes('qsv') && runtime.encoders.includes(FFMPEG_MP4_HW_ENCODER);
+
+    if (runtime.quickSyncDetected && FFMPEG_HWACCEL !== 'none') {
+      try {
+        await runProcessCapture('ffmpeg', [
+          '-hide_banner',
+          '-loglevel', 'error',
+          '-f', 'lavfi',
+          '-i', 'testsrc2=size=128x72:rate=30',
+          '-frames:v', '1',
+          '-an',
+          '-c:v', FFMPEG_MP4_HW_ENCODER,
+          '-preset', FFMPEG_QSV_PRESET,
+          '-global_quality', String(FFMPEG_QSV_GLOBAL_QUALITY),
+          '-f', 'null',
+          '-'
+        ]);
+
+        runtime.quickSyncAvailable = true;
+      } catch (error) {
+        runtime.quickSyncProbeError = error.message;
+      }
+    }
+  } catch (error) {
+    runtime.probeError = error.message;
+  }
+
+  runtime.preferredMp4Profile = resolvePreferredMp4TranscodeProfile(runtime);
+  return runtime;
+}
 
 function safeBaseName(name) {
   return name.replace(/[^a-zA-Z0-9._-]+/g, '_');
 }
 
 async function ensureDirs() {
-  await fsp.mkdir(TMP_DIR, { recursive: true });
+  await fsp.mkdir(runtimeState.tmpDir, { recursive: true });
 }
 
 async function cleanupTmpOnStartup() {
-  const entries = await fsp.readdir(TMP_DIR, { withFileTypes: true });
+  const entries = await fsp.readdir(runtimeState.tmpDir, { withFileTypes: true });
 
   await Promise.all(entries.map(async (entry) => {
-    const entryPath = path.join(TMP_DIR, entry.name);
+    const entryPath = path.join(runtimeState.tmpDir, entry.name);
     await fsp.rm(entryPath, { recursive: true, force: true });
   }));
 }
@@ -112,8 +429,10 @@ function processYtdlpOutput(job, text) {
     }
 
     if (line.startsWith('[download] Download completed')) {
-      if (job.format === 'mp3') {
-        appendEvent(job, 'Download abgeschlossen, Konvertierung startet...');
+      if (job.requiresConversion) {
+        appendEvent(job, job.format === 'mp4'
+          ? 'Download abgeschlossen, MP4-Konvertierung startet...'
+          : 'Download abgeschlossen, MP3-Konvertierung startet...');
         updateProgress(job, 55, 'convert');
       } else {
         appendEvent(job, 'Download abgeschlossen.');
@@ -128,6 +447,16 @@ function processYtdlpOutput(job, text) {
   }
 }
 
+function getConversionStatusText(job) {
+  if (job.conversionKind === 'mp4') {
+    return job.ffmpegMode === 'qsv'
+      ? 'Video wird mit Intel Quick Sync in MP4 konvertiert...'
+      : 'Video wird in MP4 konvertiert...';
+  }
+
+  return 'Audio wird in MP3 konvertiert...';
+}
+
 function processFfmpegOutput(job, text) {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 
@@ -135,7 +464,7 @@ function processFfmpegOutput(job, text) {
     const durationMatch = line.match(FFMPEG_DURATION_RE);
     if (durationMatch) {
       job.conversionDurationSec = toSeconds(durationMatch[1], durationMatch[2], durationMatch[3]);
-      appendEvent(job, 'Audio wird in MP3 konvertiert...');
+      appendEvent(job, getConversionStatusText(job));
       updateProgress(job, 60, 'convert');
       continue;
     }
@@ -145,7 +474,6 @@ function processFfmpegOutput(job, text) {
       const processedSec = toSeconds(timeMatch[1], timeMatch[2], timeMatch[3]);
       const ratio = Math.min(processedSec / job.conversionDurationSec, 1);
       updateProgress(job, 60 + (ratio * 35), 'convert');
-      continue;
     }
   }
 }
@@ -163,7 +491,7 @@ function handleProcessOutput(job, source, text) {
   }
 }
 
-function getAudioArgs(_quality) {
+function getAudioArgs() {
   return ['-f', 'bestaudio/best'];
 }
 
@@ -181,9 +509,8 @@ function getVideoArgs(quality) {
 }
 
 function getCookieArgs() {
-  const cookieFile = process.env.YTDLP_COOKIES_FILE;
-  if (cookieFile && fs.existsSync(cookieFile)) {
-    return ['--cookies', cookieFile];
+  if (YTDLP_COOKIES_FILE && fs.existsSync(YTDLP_COOKIES_FILE)) {
+    return ['--cookies', YTDLP_COOKIES_FILE];
   }
   return [];
 }
@@ -201,9 +528,7 @@ function buildArgs({ url, format, quality, targetDir }) {
   ];
 
   const formatArgs = format === 'mp4' ? getVideoArgs(quality) : getAudioArgs(quality);
-  const cookieArgs = getCookieArgs();
-
-  return [...common, ...cookieArgs, ...formatArgs, url];
+  return [...common, ...getCookieArgs(), ...formatArgs, url];
 }
 
 async function convertToMp3(inputPath, bitrate, logFn) {
@@ -219,8 +544,8 @@ async function convertToMp3(inputPath, bitrate, logFn) {
       outputPath
     ]);
 
-    ffmpeg.stdout.on('data', (buf) => logFn(buf.toString()));
-    ffmpeg.stderr.on('data', (buf) => logFn(buf.toString()));
+    ffmpeg.stdout.on('data', (buffer) => logFn(buffer.toString()));
+    ffmpeg.stderr.on('data', (buffer) => logFn(buffer.toString()));
 
     ffmpeg.on('close', (code) => {
       if (code === 0) {
@@ -237,6 +562,49 @@ async function convertToMp3(inputPath, bitrate, logFn) {
   return outputPath;
 }
 
+async function convertToMp4(inputPath, profile, logFn) {
+  const targetPath = inputPath.replace(/\.[^.]+$/, '') + '.mp4';
+  const tempOutputPath = inputPath.toLowerCase().endsWith('.mp4')
+    ? inputPath.replace(/\.mp4$/i, '.converted.mp4')
+    : targetPath;
+
+  await new Promise((resolve, reject) => {
+    const ffmpeg = spawn('ffmpeg', [
+      '-y',
+      '-i', inputPath,
+      '-map', '0:v:0?',
+      '-map', '0:a?',
+      '-movflags', '+faststart',
+      '-c:v', profile.videoCodec,
+      ...profile.videoArgs,
+      '-c:a', profile.audioCodec,
+      ...profile.audioArgs,
+      tempOutputPath
+    ]);
+
+    ffmpeg.stdout.on('data', (buffer) => logFn(buffer.toString()));
+    ffmpeg.stderr.on('data', (buffer) => logFn(buffer.toString()));
+
+    ffmpeg.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error('FFmpeg-Konvertierung nach MP4 ist fehlgeschlagen.'));
+      }
+    });
+
+    ffmpeg.on('error', reject);
+  });
+
+  await fsp.unlink(inputPath);
+
+  if (tempOutputPath !== targetPath) {
+    await fsp.rename(tempOutputPath, targetPath);
+  }
+
+  return targetPath;
+}
+
 async function zipDirectory(sourceDir, outPath, excludeFileName = null) {
   await new Promise((resolve, reject) => {
     const output = fs.createWriteStream(outPath);
@@ -247,7 +615,6 @@ async function zipDirectory(sourceDir, outPath, excludeFileName = null) {
     archive.on('error', reject);
 
     archive.pipe(output);
-
     archive.glob('**/*', {
       cwd: sourceDir,
       nodir: true,
@@ -271,7 +638,7 @@ function scheduleJobCleanup(job) {
     clearTimeout(job.cleanupTimer);
   }
 
-  job.expiresAt = new Date(Date.now() + JOB_TTL_MS).toISOString();
+  job.expiresAt = new Date(Date.now() + runtimeState.jobTtlMs).toISOString();
 
   job.cleanupTimer = setTimeout(async () => {
     try {
@@ -279,7 +646,31 @@ function scheduleJobCleanup(job) {
     } finally {
       jobs.delete(job.id);
     }
-  }, JOB_TTL_MS);
+  }, runtimeState.jobTtlMs);
+}
+
+function resolveRequestBaseUrl(req) {
+  if (PUBLIC_API_BASE_URL) {
+    return PUBLIC_API_BASE_URL;
+  }
+
+  const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
+  if (!host) {
+    return '';
+  }
+
+  const protocol = (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
+  return `${protocol}://${host}/`;
+}
+
+function resolveDownloadUrl(req, job) {
+  const relativePath = `/api/file/${job.id}`;
+  const baseUrl = resolveRequestBaseUrl(req);
+  if (!baseUrl) {
+    return relativePath;
+  }
+
+  return new URL(relativePath, baseUrl).toString();
 }
 
 app.post('/api/download', async (req, res) => {
@@ -290,7 +681,7 @@ app.post('/api/download', async (req, res) => {
   }
 
   const id = crypto.randomUUID();
-  const targetDir = path.join(TMP_DIR, id);
+  const targetDir = path.join(runtimeState.tmpDir, id);
   await fsp.mkdir(targetDir, { recursive: true });
 
   const job = {
@@ -298,6 +689,7 @@ app.post('/api/download', async (req, res) => {
     url,
     format,
     quality,
+    requiresConversion: ['mp3', 'mp4'].includes(format),
     status: 'running',
     stage: 'queued',
     progress: 0,
@@ -311,7 +703,9 @@ app.post('/api/download', async (req, res) => {
     downloadPath: null,
     error: null,
     cleanupTimer: null,
-    conversionDurationSec: null
+    conversionDurationSec: null,
+    conversionKind: null,
+    ffmpegMode: null
   };
 
   jobs.set(id, job);
@@ -321,13 +715,13 @@ app.post('/api/download', async (req, res) => {
   const args = buildArgs({ url, format, quality, targetDir });
   const child = spawn('yt-dlp', args);
 
-  child.stdout.on('data', (buf) => handleProcessOutput(job, 'ytdlp', buf.toString()));
-  child.stderr.on('data', (buf) => handleProcessOutput(job, 'ytdlp', buf.toString()));
+  child.stdout.on('data', (buffer) => handleProcessOutput(job, 'ytdlp', buffer.toString()));
+  child.stderr.on('data', (buffer) => handleProcessOutput(job, 'ytdlp', buffer.toString()));
 
-  child.on('error', (err) => {
+  child.on('error', (error) => {
     job.status = 'error';
     job.stage = 'error';
-    job.error = `yt-dlp konnte nicht gestartet werden: ${err.message}`;
+    job.error = `yt-dlp konnte nicht gestartet werden: ${error.message}`;
     appendEvent(job, 'Fehler beim Start von yt-dlp.');
     scheduleJobCleanup(job);
   });
@@ -369,11 +763,47 @@ app.post('/api/download', async (req, res) => {
             continue;
           }
 
+          job.conversionKind = 'mp3';
+          job.ffmpegMode = 'software';
+          job.conversionDurationSec = null;
           const mp3Path = await convertToMp3(entry.full, bitrate, (text) => handleProcessOutput(job, 'ffmpeg', text));
 
           converted.push({
             name: path.basename(mp3Path),
             full: mp3Path
+          });
+        }
+
+        entries = converted;
+      }
+
+      if (format === 'mp4') {
+        const converted = [];
+        const preferredProfile = ffmpegRuntime.preferredMp4Profile || getSoftwareMp4TranscodeProfile();
+
+        for (const entry of entries) {
+          job.conversionKind = 'mp4';
+          job.ffmpegMode = preferredProfile.mode;
+          job.conversionDurationSec = null;
+
+          let mp4Path;
+
+          try {
+            mp4Path = await convertToMp4(entry.full, preferredProfile, (text) => handleProcessOutput(job, 'ffmpeg', text));
+          } catch (error) {
+            if (preferredProfile.mode !== 'qsv') {
+              throw error;
+            }
+
+            appendEvent(job, 'Intel Quick Sync konnte nicht genutzt werden, Software-Encoding wird verwendet...');
+            job.ffmpegMode = 'software';
+            job.conversionDurationSec = null;
+            mp4Path = await convertToMp4(entry.full, getSoftwareMp4TranscodeProfile(), (text) => handleProcessOutput(job, 'ffmpeg', text));
+          }
+
+          converted.push({
+            name: path.basename(mp4Path),
+            full: mp4Path
           });
         }
 
@@ -408,10 +838,10 @@ app.post('/api/download', async (req, res) => {
       appendEvent(job, 'Datei steht zum Download bereit.');
 
       scheduleJobCleanup(job);
-    } catch (err) {
+    } catch (error) {
       job.status = 'error';
       job.stage = 'error';
-      job.error = err.message;
+      job.error = error.message;
       appendEvent(job, 'Verarbeitung fehlgeschlagen.');
       scheduleJobCleanup(job);
     }
@@ -435,7 +865,7 @@ app.get('/api/status/:id', (req, res) => {
     log: job.log.slice(-10).join('\n'),
     rawLog: job.rawLog.slice(-200).join(''),
     downloadName: job.downloadName,
-    downloadUrl: job.status === 'done' ? `/api/file/${job.id}` : null,
+    downloadUrl: job.status === 'done' ? resolveDownloadUrl(req, job) : null,
     createdAt: job.createdAt,
     completedAt: job.completedAt,
     expiresAt: job.expiresAt
@@ -458,23 +888,111 @@ app.get('/api/file/:id', async (req, res) => {
 });
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    publicClientConfig: buildPublicClientConfig(),
+    runtimeChecksSkipped: runtimeState.runtimeChecksSkipped,
+    ffmpegProbeSkipped: runtimeState.ffmpegProbeSkipped,
+    ffmpeg: {
+      version: ffmpegRuntime.version,
+      requestedHwAccel: ffmpegRuntime.requestedHwAccel,
+      quickSyncDetected: ffmpegRuntime.quickSyncDetected,
+      quickSyncAvailable: ffmpegRuntime.quickSyncAvailable,
+      selectedMp4Mode: ffmpegRuntime.preferredMp4Profile.mode,
+      selectedMp4VideoCodec: ffmpegRuntime.preferredMp4Profile.videoCodec,
+      hwaccels: ffmpegRuntime.hwaccels,
+      probeError: ffmpegRuntime.probeError,
+      quickSyncProbeError: ffmpegRuntime.quickSyncProbeError,
+      probedAt: ffmpegRuntime.probedAt
+    }
+  });
 });
 
-ensureDirs()
-  .then(cleanupTmpOnStartup)
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server laeuft auf Port ${PORT}`);
-      console.log(`TMP_DIR: ${TMP_DIR}`);
-      console.log(`JOB_TTL_MS: ${JOB_TTL_MS}`);
-      console.log('Temporaere Job-Dateien beim Start bereinigt.');
-    });
-  })
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
+async function startServer(options = {}) {
+  runtimeState.tmpDir = resolvePathValue(options.tmpDir || runtimeState.tmpDir);
+  runtimeState.jobTtlMs = Number(options.jobTtlMs || runtimeState.jobTtlMs);
+  runtimeState.runtimeChecksSkipped = options.skipRuntimeChecks ?? SKIP_RUNTIME_CHECKS;
+  runtimeState.ffmpegProbeSkipped = options.skipFfmpegProbe ?? SKIP_FFMPEG_PROBE;
+
+  await ensureDirs();
+  await cleanupTmpOnStartup();
+
+  if (!runtimeState.runtimeChecksSkipped) {
+    await verifyRequiredBinaries();
+  }
+
+  ffmpegRuntime = runtimeState.ffmpegProbeSkipped
+    ? createDefaultFfmpegRuntime()
+    : await probeFfmpegRuntime();
+
+  const port = options.port ?? DEFAULT_PORT;
+  const quiet = options.quiet === true;
+
+  const server = await new Promise((resolve, reject) => {
+    const instance = app.listen(port, () => resolve(instance));
+    instance.on('error', reject);
   });
 
+  const address = server.address();
+  const resolvedPort = typeof address === 'object' && address ? address.port : port;
 
+  if (!quiet) {
+    logStartupSummary(resolvedPort);
+  }
 
+  return {
+    app,
+    server,
+    port: resolvedPort,
+    tmpDir: runtimeState.tmpDir,
+    ffmpegRuntime
+  };
+}
+
+function logStartupSummary(port) {
+  console.log(`Server laeuft auf Port ${port}`);
+  console.log(`TMP_DIR: ${runtimeState.tmpDir}`);
+  console.log(`JOB_TTL_MS: ${runtimeState.jobTtlMs}`);
+  console.log(`FFMPEG_HWACCEL: ${FFMPEG_HWACCEL}`);
+
+  if (ffmpegRuntime.version) {
+    console.log(ffmpegRuntime.version);
+  }
+
+  if (runtimeState.runtimeChecksSkipped) {
+    console.log('Runtime-Checks wurden fuer diesen Start uebersprungen.');
+  }
+
+  if (runtimeState.ffmpegProbeSkipped) {
+    console.log('FFmpeg-Probe wurde fuer diesen Start uebersprungen.');
+    return;
+  }
+
+  if (ffmpegRuntime.probeError) {
+    console.log(`FFmpeg-Probe fehlgeschlagen: ${ffmpegRuntime.probeError}`);
+  } else if (ffmpegRuntime.quickSyncAvailable) {
+    console.log(`Intel Quick Sync erkannt, MP4-Encoding nutzt ${ffmpegRuntime.preferredMp4Profile.videoCodec}.`);
+  } else if (ffmpegRuntime.quickSyncDetected) {
+    console.log(`Intel Quick Sync im FFmpeg-Build gefunden, aber nicht nutzbar: ${ffmpegRuntime.quickSyncProbeError}`);
+    console.log('MP4-Encoding faellt deshalb standardmaessig auf libx264 zurueck.');
+  } else {
+    console.log('Intel Quick Sync nicht verfuegbar, MP4-Encoding faellt auf libx264 zurueck.');
+  }
+
+  console.log('MP3-Konvertierung bleibt CPU-basiert, weil dafuer libmp3lame verwendet wird.');
+  console.log('Temporaere Job-Dateien beim Start bereinigt.');
+}
+
+module.exports = {
+  app,
+  startServer,
+  buildPublicClientConfig,
+  verifyRequiredBinaries
+};
+
+if (require.main === module) {
+  startServer().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

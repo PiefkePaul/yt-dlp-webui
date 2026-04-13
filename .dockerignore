@@ -4,3 +4,6 @@ node_modules
 npm-debug.log
 cookies
 tmp
+dist-pages
+.env
+.env.local
