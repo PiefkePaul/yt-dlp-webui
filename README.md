@@ -172,7 +172,9 @@ Der Workflow [.github/workflows/deploy-pages.yml](/Volumes/ssd-data/Docker/yt-dl
 Empfehlung fuer die Repository-Einstellungen:
 
 1. In GitHub unter `Settings > Pages` als Quelle `GitHub Actions` verwenden.
-2. Die erste erfolgreiche Ausfuehrung des Pages-Workflows abwarten.
+2. Danach den naechsten Push oder einen manuellen `workflow_dispatch` abwarten.
+
+Solange GitHub Pages in den Repository-Einstellungen noch nicht aktiviert ist, ueberspringt der Workflow den eigentlichen Deploy bewusst statt rot zu werden.
 
 ## NPM-Skripte
 

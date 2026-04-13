@@ -4,13 +4,13 @@ on:
   push:
     branches:
       - main
-      - master
     tags:
       - "v*"
   workflow_dispatch:
 
 env:
   IMAGE_NAME: yt-dlp-webui
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   docker:
@@ -39,13 +39,22 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Normalize image owners
+        id: owners
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          echo "ghcr_owner=$(echo "$REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          echo "dockerhub_owner=$(echo "$DOCKERHUB_USERNAME" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+            ghcr.io/${{ steps.owners.outputs.ghcr_owner }}/${{ env.IMAGE_NAME }}
+            ${{ steps.owners.outputs.dockerhub_owner }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
