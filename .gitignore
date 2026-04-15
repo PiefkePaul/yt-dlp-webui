@@ -1,5 +1,7 @@
 node_modules/
+.local/
 tmp/
+tmp-test/
 dist-pages/
 dist-release/
 tmp-smoke/
