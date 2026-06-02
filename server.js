@@ -18,6 +18,10 @@ const PUBLIC_API_BASE_URL = normalizeBaseUrl(process.env.PUBLIC_API_BASE_URL || 
 const PUBLIC_DEMO_MODE = normalizeBoolean(process.env.PUBLIC_DEMO_MODE, false);
 const PUBLIC_DEMO_MESSAGE = (process.env.PUBLIC_DEMO_MESSAGE || '').trim()
   || 'Diese Seite ist aktuell nur eine statische Vorschau ohne angebundenes Backend.';
+// Go+-geschützter Track für Token-Verifikation. Muss ein Track sein,
+// der ohne Abo als 30s-Preview ausgeliefert wird.
+// Alternativ: SC_TEST_TRACK_URL in .env setzen.
+const SC_TEST_TRACK_URL = process.env.SC_TEST_TRACK_URL || '';
 const CORS_ALLOWED_ORIGINS = parseAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS);
 const SKIP_RUNTIME_CHECKS = normalizeBoolean(process.env.SKIP_RUNTIME_CHECKS, false);
 const SKIP_FFMPEG_PROBE = normalizeBoolean(process.env.SKIP_FFMPEG_PROBE, false);
@@ -726,7 +730,7 @@ function resolveDownloadUrl(req, job) {
 }
 
 app.post('/api/download', async (req, res) => {
-  const { url, format = 'mp3', quality = 'best' } = req.body || {};
+  const { url, format = 'mp3', quality = 'best', scToken } = req.body || {};
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: 'Bitte einen gueltigen Link angeben.' });
@@ -741,7 +745,7 @@ app.post('/api/download', async (req, res) => {
     url,
     format,
     quality,
-    requiresConversion: ['mp3', 'mp4'].includes(format),
+    requiresConversion: format === 'mp3' || (format === 'mp4' && detectSource(url) !== 'soundcloud'),
     status: 'running',
     stage: 'queued',
     progress: 0,
@@ -764,7 +768,35 @@ app.post('/api/download', async (req, res) => {
   appendEvent(job, 'Job gestartet.');
   updateProgress(job, 1, 'queued');
 
-  const args = buildArgs({ url, format, quality, targetDir });
+  // SC: Token in Cookie-Datei schreiben oder Preflight-Check
+  let cookiePath = null;
+  if (detectSource(url) === 'soundcloud') {
+    if (scToken && typeof scToken === 'string' && scToken.trim()) {
+      try {
+        cookiePath = await writeTempCookieFile(targetDir, scToken.trim());
+      } catch {
+        job.status = 'error';
+        job.stage = 'error';
+        job.error = 'Cookie-Datei konnte nicht erstellt werden.';
+        appendEvent(job, 'Interner Fehler beim Token-Handling.');
+        scheduleJobCleanup(job);
+        return res.json({ id });
+      }
+    } else {
+      appendEvent(job, 'Prüfe ob Track öffentlich zugänglich...');
+      const isPreview = await checkScPreview(url);
+      if (isPreview) {
+        job.status = 'error';
+        job.stage = 'error';
+        job.error = 'Dieser Track benötigt einen SoundCloud-Token — ohne Token wird nur eine 30s-Vorschau ausgeliefert.';
+        appendEvent(job, 'Token benötigt.');
+        scheduleJobCleanup(job);
+        return res.json({ id });
+      }
+    }
+  }
+
+  const args = buildArgs({ url, format, quality, targetDir, cookiePath });
   const child = spawn('yt-dlp', args);
 
   child.stdout.on('data', (buffer) => handleProcessOutput(job, 'ytdlp', buffer.toString()));
