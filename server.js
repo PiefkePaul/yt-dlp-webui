@@ -936,6 +936,72 @@ app.post('/api/download', async (req, res) => {
   res.json({ id });
 });
 
+app.post('/api/sc-verify', async (req, res) => {
+  const { token } = req.body || {};
+
+  if (!token || typeof token !== 'string' || !token.trim()) {
+    return res.status(400).json({ valid: false, error: 'Kein Token angegeben.' });
+  }
+
+  const trimmedToken = token.trim();
+
+  // Schritt 1: SC REST API /me
+  let username;
+  let goPlus = false;
+  try {
+    const scRes = await fetch('https://api.soundcloud.com/me', {
+      headers: { 'Authorization': `OAuth ${trimmedToken}` }
+    });
+
+    if (!scRes.ok) {
+      return res.json({ valid: false, error: 'Token ungültig oder abgelaufen.' });
+    }
+
+    const data = await scRes.json();
+    username = data.username || data.permalink || 'Unbekannt';
+    const plan = (data.plan || '').toLowerCase();
+    const productName = ((data.subscription || {}).product || {}).name || '';
+    goPlus = plan.includes('go') || productName.toLowerCase().includes('go');
+  } catch {
+    return res.json({ valid: false, error: 'SC-API nicht erreichbar.' });
+  }
+
+  // Schritt 2: yt-dlp Duration-Check (nur wenn TEST_URL konfiguriert)
+  if (SC_TEST_TRACK_URL) {
+    const verifyDir = os.tmpdir();
+    let tempCookiePath;
+    try {
+      tempCookiePath = await writeTempCookieFile(verifyDir, trimmedToken);
+      // Umbenennen damit kein Konflikt mit Job-Cookie-Dateien entsteht
+      const uniquePath = path.join(verifyDir, `sc-verify-${crypto.randomUUID()}.cookies`);
+      await fsp.rename(tempCookiePath, uniquePath);
+      tempCookiePath = uniquePath;
+
+      const result = await runProcessCapture('yt-dlp', [
+        '--dump-json', '--no-playlist', '--no-warnings',
+        '--cookies', tempCookiePath,
+        SC_TEST_TRACK_URL
+      ]);
+
+      const info = JSON.parse(result.stdout.trim());
+      if (typeof info.duration === 'number' && info.duration <= 35) {
+        return res.json({
+          valid: false,
+          error: 'Token gültig, aber kein Zugriff auf Go+-Tracks — nur 30s-Preview verfügbar.'
+        });
+      }
+    } catch {
+      // yt-dlp-Check fehlgeschlagen → /me war erfolgreich, trotzdem valid
+    } finally {
+      if (tempCookiePath) {
+        await fsp.unlink(tempCookiePath).catch(() => {});
+      }
+    }
+  }
+
+  return res.json({ valid: true, username, goPlus });
+});
+
 app.get('/api/status/:id', (req, res) => {
   const job = jobs.get(req.params.id);
   if (!job) {
