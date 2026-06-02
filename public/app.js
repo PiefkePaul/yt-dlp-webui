@@ -47,14 +47,77 @@
   const modeBanner = document.getElementById('modeBanner');
   const modeBannerText = document.getElementById('modeBannerText');
   const apiInfo = document.getElementById('apiInfo');
+  const settingsToggle = document.getElementById('settingsToggle');
+  const settingsPanel = document.getElementById('settingsPanel');
+  const scTokenInput = document.getElementById('scTokenInput');
+  const scTokenSave = document.getElementById('scTokenSave');
+  const scTokenVerify = document.getElementById('scTokenVerify');
+  const scVerifyResult = document.getElementById('scVerifyResult');
+  const scBanner = document.getElementById('scBanner');
+  const scBannerTokenBtn = document.getElementById('scBannerTokenBtn');
 
   function createApiUrl(value) {
     return new URL(value, apiBaseUrl || window.location.origin).toString();
   }
 
+  function detectSoundCloud(url) {
+    try {
+      return new URL(url).hostname.replace(/^www\./, '') === 'soundcloud.com';
+    } catch {
+      return false;
+    }
+  }
+
+  function loadScToken() {
+    return localStorage.getItem('sc_oauth_token') || '';
+  }
+
+  function saveScToken(token) {
+    if (token) {
+      localStorage.setItem('sc_oauth_token', token);
+    } else {
+      localStorage.removeItem('sc_oauth_token');
+    }
+  }
+
+  function updateUiForSource(isSoundCloud) {
+    const mp4Option = formatSelect.querySelector('option[value="mp4"]');
+    const originalOption = formatSelect.querySelector('option[value="original"]');
+
+    if (isSoundCloud) {
+      if (mp4Option) mp4Option.style.display = 'none';
+      if (originalOption) originalOption.style.display = '';
+      if (formatSelect.value === 'mp4') {
+        formatSelect.value = 'mp3';
+        fillQualityOptions('mp3');
+      }
+      const hasToken = Boolean(loadScToken());
+      scBanner.classList.toggle('hidden', hasToken);
+    } else {
+      if (mp4Option) mp4Option.style.display = '';
+      if (originalOption) originalOption.style.display = 'none';
+      if (formatSelect.value === 'original') {
+        formatSelect.value = 'mp3';
+        fillQualityOptions('mp3');
+      }
+      scBanner.classList.add('hidden');
+    }
+  }
+
   function fillQualityOptions(format) {
     qualitySelect.innerHTML = '';
-    for (const option of qualityMap[format]) {
+
+    if (format === 'original') {
+      qualitySelect.disabled = true;
+      const el = document.createElement('option');
+      el.value = '';
+      el.textContent = '—';
+      qualitySelect.appendChild(el);
+      return;
+    }
+
+    qualitySelect.disabled = false;
+    for (const option of qualityMap[format] || []) {
       const element = document.createElement('option');
       element.value = option.value;
       element.textContent = option.label;
@@ -158,6 +221,72 @@
   fillQualityOptions('mp3');
   formatSelect.addEventListener('change', () => fillQualityOptions(formatSelect.value));
 
+  document.getElementById('url').addEventListener('input', (e) => {
+    updateUiForSource(detectSoundCloud(e.target.value));
+  });
+
+  settingsToggle.addEventListener('click', () => {
+    settingsPanel.classList.toggle('hidden');
+    if (!settingsPanel.classList.contains('hidden')) {
+      scTokenInput.value = loadScToken();
+      scVerifyResult.textContent = '';
+      scVerifyResult.className = 'verify-result';
+    }
+  });
+
+  scBannerTokenBtn.addEventListener('click', () => {
+    settingsPanel.classList.remove('hidden');
+    scTokenInput.value = loadScToken();
+    scVerifyResult.textContent = '';
+    scVerifyResult.className = 'verify-result';
+    scTokenInput.focus();
+  });
+
+  scTokenSave.addEventListener('click', () => {
+    const token = scTokenInput.value.trim();
+    saveScToken(token);
+    const isSC = detectSoundCloud(document.getElementById('url').value);
+    updateUiForSource(isSC);
+    scVerifyResult.textContent = token ? 'Token gespeichert.' : 'Token entfernt.';
+    scVerifyResult.className = 'verify-result ok';
+  });
+
+  scTokenVerify.addEventListener('click', async () => {
+    const token = scTokenInput.value.trim();
+    if (!token) {
+      scVerifyResult.textContent = 'Bitte zuerst einen Token eingeben.';
+      scVerifyResult.className = 'verify-result error';
+      return;
+    }
+
+    scTokenVerify.disabled = true;
+    scVerifyResult.textContent = 'Prüfe Token...';
+    scVerifyResult.className = 'verify-result pending';
+
+    try {
+      const response = await fetch(createApiUrl('/api/sc-verify'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+      const data = await response.json();
+
+      if (data.valid) {
+        const goLabel = data.goPlus ? ' · SC Go+: ✓' : '';
+        scVerifyResult.textContent = `✓ Token gültig · Nutzer: ${data.username}${goLabel}`;
+        scVerifyResult.className = 'verify-result ok';
+      } else {
+        scVerifyResult.textContent = `✗ ${data.error || 'Token ungültig.'}`;
+        scVerifyResult.className = 'verify-result error';
+      }
+    } catch {
+      scVerifyResult.textContent = '✗ Verbindung zum Server fehlgeschlagen.';
+      scVerifyResult.className = 'verify-result error';
+    } finally {
+      scTokenVerify.disabled = false;
+    }
+  });
+
   if (apiBaseUrl) {
     apiInfo.textContent = `API-Ziel: ${apiBaseUrl}`;
     apiInfo.classList.remove('hidden');
@@ -185,13 +314,18 @@
     submitBtn.disabled = true;
 
     try {
+      const urlInput = document.getElementById('url').value;
+      const isSC = detectSoundCloud(urlInput);
+      const scToken = isSC ? loadScToken() : undefined;
+
       const response = await fetch(createApiUrl('/api/download'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          url: document.getElementById('url').value,
+          url: urlInput,
           format: formatSelect.value,
-          quality: qualitySelect.value
+          quality: qualitySelect.value,
+          ...(scToken ? { scToken } : {})
         })
       });
 
@@ -204,4 +338,9 @@
       submitBtn.disabled = false;
     }
   });
+
+  const savedToken = loadScToken();
+  if (savedToken) {
+    scTokenInput.value = savedToken;
+  }
 }());
