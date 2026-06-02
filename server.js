@@ -968,14 +968,10 @@ app.post('/api/sc-verify', async (req, res) => {
 
   // Schritt 2: yt-dlp Duration-Check (nur wenn TEST_URL konfiguriert)
   if (SC_TEST_TRACK_URL) {
-    const verifyDir = os.tmpdir();
-    let tempCookiePath;
+    let verifyTmpDir;
     try {
-      tempCookiePath = await writeTempCookieFile(verifyDir, trimmedToken);
-      // Umbenennen damit kein Konflikt mit Job-Cookie-Dateien entsteht
-      const uniquePath = path.join(verifyDir, `sc-verify-${crypto.randomUUID()}.cookies`);
-      await fsp.rename(tempCookiePath, uniquePath);
-      tempCookiePath = uniquePath;
+      verifyTmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sc-verify-'));
+      const tempCookiePath = await writeTempCookieFile(verifyTmpDir, trimmedToken);
 
       const result = await runProcessCapture('yt-dlp', [
         '--dump-json', '--no-playlist', '--no-warnings',
@@ -993,8 +989,8 @@ app.post('/api/sc-verify', async (req, res) => {
     } catch {
       // yt-dlp-Check fehlgeschlagen → /me war erfolgreich, trotzdem valid
     } finally {
-      if (tempCookiePath) {
-        await fsp.unlink(tempCookiePath).catch(() => {});
+      if (verifyTmpDir) {
+        await fsp.rm(verifyTmpDir, { recursive: true, force: true }).catch(() => {});
       }
     }
   }
