@@ -9,3 +9,5 @@ cookies/*.cookie
 .env
 .env.local
 npm-debug.log*
+
+.superpowers/
