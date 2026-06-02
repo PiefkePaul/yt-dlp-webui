@@ -777,6 +777,7 @@ app.post('/api/download', async (req, res) => {
       } catch {
         job.status = 'error';
         job.stage = 'error';
+        updateProgress(job, 0, 'error');
         job.error = 'Cookie-Datei konnte nicht erstellt werden.';
         appendEvent(job, 'Interner Fehler beim Token-Handling.');
         scheduleJobCleanup(job);
@@ -788,6 +789,7 @@ app.post('/api/download', async (req, res) => {
       if (isPreview) {
         job.status = 'error';
         job.stage = 'error';
+        updateProgress(job, 0, 'error');
         job.error = 'Dieser Track benötigt einen SoundCloud-Token — ohne Token wird nur eine 30s-Vorschau ausgeliefert.';
         appendEvent(job, 'Token benötigt.');
         scheduleJobCleanup(job);
@@ -822,7 +824,7 @@ app.post('/api/download', async (req, res) => {
       }
 
       let entries = (await fsp.readdir(targetDir, { withFileTypes: true }))
-        .filter((entry) => entry.isFile())
+        .filter((entry) => entry.isFile() && entry.name !== 'sc.cookies')
         .map((entry) => ({
           name: entry.name,
           full: path.join(targetDir, entry.name)
