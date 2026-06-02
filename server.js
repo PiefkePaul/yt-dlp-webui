@@ -4,6 +4,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const crypto = require('crypto');
 const { spawn } = require('child_process');
+const os = require('os');
 const archiver = require('archiver');
 
 const DEFAULT_PORT = Number(process.env.PORT || 3000);
@@ -82,6 +83,15 @@ function normalizeHwAccelPreference(value) {
 function resolvePathValue(value) {
   if (!value) return '';
   return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
+}
+
+function detectSource(url) {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, '');
+    return hostname === 'soundcloud.com' ? 'soundcloud' : 'other';
+  } catch {
+    return 'other';
+  }
 }
 
 function parseAllowedOrigins(value) {
@@ -987,7 +997,8 @@ module.exports = {
   app,
   startServer,
   buildPublicClientConfig,
-  verifyRequiredBinaries
+  verifyRequiredBinaries,
+  detectSource
 };
 
 if (require.main === module) {
