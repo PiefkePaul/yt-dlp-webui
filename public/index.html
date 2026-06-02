@@ -109,6 +109,66 @@
       align-items: center;
       flex-wrap: wrap;
     }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .settings-toggle {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.85rem;
+      min-width: 0;
+      padding: 8px 14px;
+      flex-shrink: 0;
+    }
+    .settings-toggle:hover { color: var(--text); }
+    .settings-panel {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(15, 23, 42, 0.8);
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+    .settings-panel .label {
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .settings-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .verify-result { font-size: 0.82rem; min-height: 1.2em; }
+    .verify-result.ok { color: #86efac; }
+    .verify-result.error { color: #fca5a5; }
+    .verify-result.pending { color: var(--muted); }
+    .banner.sc-warning {
+      border-color: rgba(245, 158, 11, 0.4);
+      background: rgba(120, 53, 15, 0.2);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .banner.sc-warning .link-btn {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.82rem;
+      padding: 5px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      min-width: 0;
+      flex-shrink: 0;
+    }
     .progress-wrap { display: grid; gap: 8px; }
     .progress-meta {
       display: flex;
@@ -157,11 +217,31 @@
 </head>
 <body>
   <main class="card stack">
-    <div>
-      <h1>yt-dlp Download-Server</h1>
-      <p>Selbst hostbarer Download-Server fuer <code>yt-dlp</code> mit Weboberflaeche fuer Einzelvideos und Playlists.</p>
-      <p>Die App laeuft als normaler Node-Server und kann bei Bedarf optional in Docker verpackt werden.</p>
+    <div class="card-header">
+      <div>
+        <h1>yt-dlp Download-Server</h1>
+        <p>Selbst hostbarer Download-Server fuer <code>yt-dlp</code> mit Weboberflaeche fuer Einzelvideos und Playlists.</p>
+      </div>
+      <button id="settingsToggle" type="button" class="settings-toggle">⚙ Einstellungen</button>
     </div>
+
+    <section id="settingsPanel" class="settings-panel hidden">
+      <div class="label">SoundCloud-Token</div>
+      <p class="muted" style="margin:0;font-size:0.85rem;line-height:1.5">
+        Benötigt für private, altersgeschützte oder Go+-Tracks.<br>
+        Zu finden in den Browser-DevTools:<br>
+        <code>Application → Local Storage → soundcloud.com → oauth_token</code>
+      </p>
+      <div class="settings-row">
+        <input id="scTokenInput" type="password" placeholder="2-123456-789012345-ABCDEFGH..." />
+        <button id="scTokenSave" type="button">Speichern</button>
+        <button id="scTokenVerify" type="button" class="secondary" style="min-width:0">Prüfen</button>
+      </div>
+      <div id="scVerifyResult" class="verify-result"></div>
+      <p class="muted" style="margin:0;font-size:0.78rem">
+        Token wird nur im Browser gespeichert (localStorage) — nie dauerhaft auf dem Server.
+      </p>
+    </section>
 
     <section id="modeBanner" class="banner hidden">
       <strong>Betriebsmodus</strong>
@@ -176,11 +256,19 @@
         <select id="format">
           <option value="mp3" selected>MP3</option>
           <option value="mp4">MP4</option>
+          <option value="original" class="sc-only" style="display:none">Original (beste Qualität)</option>
         </select>
         <select id="quality"></select>
         <button id="submitBtn" type="submit">Laden</button>
       </div>
     </form>
+
+    <div id="scBanner" class="banner sc-warning hidden">
+      <span style="color:#fbbf24;font-size:0.88rem">
+        ⚠ Kein SoundCloud-Token gesetzt — private oder Go+-Tracks können nicht geladen werden.
+      </span>
+      <button type="button" class="link-btn" id="scBannerTokenBtn">Token setzen →</button>
+    </div>
 
     <section id="statusBox" class="status hidden stack">
       <div id="stateText">Warte auf Start...</div>
