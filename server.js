@@ -94,6 +94,28 @@ function detectSource(url) {
   }
 }
 
+async function writeTempCookieFile(dirPath, token) {
+  const cookiePath = path.join(dirPath, 'sc.cookies');
+  const content = [
+    '# Netscape HTTP Cookie File',
+    `.soundcloud.com\tTRUE\t/\tTRUE\t2147483647\toauth_token\t${token}`
+  ].join('\n');
+  await fsp.writeFile(cookiePath, content, 'utf8');
+  return cookiePath;
+}
+
+async function checkScPreview(url) {
+  try {
+    const result = await runProcessCapture('yt-dlp', [
+      '--dump-json', '--no-playlist', '--no-warnings', url
+    ]);
+    const info = JSON.parse(result.stdout.trim());
+    return typeof info.duration === 'number' && info.duration <= 35;
+  } catch {
+    return false;
+  }
+}
+
 function parseAllowedOrigins(value) {
   const normalized = String(value || '').trim();
   if (!normalized) return [];
@@ -1020,7 +1042,8 @@ module.exports = {
   verifyRequiredBinaries,
   detectSource,
   buildScArgs,
-  buildYtArgs
+  buildYtArgs,
+  writeTempCookieFile
 };
 
 if (require.main === module) {
