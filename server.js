@@ -91,8 +91,9 @@ function resolvePathValue(value) {
 
 function detectSource(url) {
   try {
-    const hostname = new URL(url).hostname.replace(/^www\./, '');
-    return hostname === 'soundcloud.com' ? 'soundcloud' : 'other';
+    const hostname = new URL(url).hostname;
+    const isSc = hostname === 'soundcloud.com' || hostname.endsWith('.soundcloud.com');
+    return isSc ? 'soundcloud' : 'other';
   } catch {
     return 'other';
   }

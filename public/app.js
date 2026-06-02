@@ -62,7 +62,8 @@
 
   function detectSoundCloud(url) {
     try {
-      return new URL(url).hostname.replace(/^www\./, '') === 'soundcloud.com';
+      const hostname = new URL(url).hostname;
+      return hostname === 'soundcloud.com' || hostname.endsWith('.soundcloud.com');
     } catch {
       return false;
     }
@@ -269,6 +270,9 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token })
       });
+      if (!response.ok && response.status !== 400) {
+        throw new Error(`Server-Fehler: ${response.status}`);
+      }
       const data = await response.json();
 
       if (data.valid) {

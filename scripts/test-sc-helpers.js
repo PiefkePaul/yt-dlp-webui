@@ -30,6 +30,12 @@ test('ungültige URL → other', () => {
 test('leerer String → other', () => {
   assert.strictEqual(detectSource(''), 'other');
 });
+test('m.soundcloud.com → soundcloud', () => {
+  assert.strictEqual(detectSource('https://m.soundcloud.com/artist/track'), 'soundcloud');
+});
+test('on.soundcloud.com → soundcloud', () => {
+  assert.strictEqual(detectSource('https://on.soundcloud.com/sharelink'), 'soundcloud');
+});
 
 console.log('\nbuildScArgs:');
 test('enthält bestaudio/best', () => {
