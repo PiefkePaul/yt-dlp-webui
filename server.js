@@ -525,7 +525,7 @@ function getCookieArgs() {
   return [];
 }
 
-function buildArgs({ url, format, quality, targetDir }) {
+function buildYtArgs({ url, format, quality, targetDir }) {
   const common = [
     '--yes-playlist',
     '--newline',
@@ -537,8 +537,28 @@ function buildArgs({ url, format, quality, targetDir }) {
     '-o', '%(title).200B [%(id)s].%(ext)s'
   ];
 
-  const formatArgs = format === 'mp4' ? getVideoArgs(quality) : getAudioArgs(quality);
+  const formatArgs = format === 'mp4' ? getVideoArgs(quality) : getAudioArgs();
   return [...common, ...getCookieArgs(), ...formatArgs, url];
+}
+
+function buildScArgs({ url, format, targetDir, cookiePath }) {
+  const common = [
+    '--yes-playlist',
+    '--newline',
+    '--restrict-filenames',
+    '-P', targetDir,
+    '-o', '%(title).200B [%(id)s].%(ext)s'
+  ];
+
+  const cookieArgs = cookiePath ? ['--cookies', cookiePath] : [];
+  return [...common, ...cookieArgs, '-f', 'bestaudio/best', url];
+}
+
+function buildArgs({ url, format, quality, targetDir, cookiePath = null }) {
+  if (detectSource(url) === 'soundcloud') {
+    return buildScArgs({ url, format, targetDir, cookiePath });
+  }
+  return buildYtArgs({ url, format, quality, targetDir });
 }
 
 async function convertToMp3(inputPath, bitrate, logFn) {
@@ -998,7 +1018,9 @@ module.exports = {
   startServer,
   buildPublicClientConfig,
   verifyRequiredBinaries,
-  detectSource
+  detectSource,
+  buildScArgs,
+  buildYtArgs
 };
 
 if (require.main === module) {
