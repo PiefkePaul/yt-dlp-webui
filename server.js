@@ -795,7 +795,7 @@ function resolveDownloadUrl(req, job) {
 }
 
 app.post('/api/download', async (req, res) => {
-  const { url, format = 'mp3', quality = 'best', scToken } = req.body || {};
+  const { url, format = 'mp3', quality = 'best', encryptedToken, encryptedSession } = req.body || {};
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: 'Bitte einen gueltigen Link angeben.' });
@@ -833,12 +833,33 @@ app.post('/api/download', async (req, res) => {
   appendEvent(job, 'Job gestartet.');
   updateProgress(job, 1, 'queued');
 
-  // SC: Token in Cookie-Datei schreiben oder Preflight-Check
   let cookiePath = null;
+  let freshEncryptedSession = null;
+
   if (detectSource(url) === 'soundcloud') {
-    if (scToken && typeof scToken === 'string' && scToken.trim()) {
+    if (encryptedToken && typeof encryptedToken === 'string') {
+      const oauthToken = decryptFromClient(encryptedToken);
+      if (!oauthToken) {
+        job.status = 'error';
+        job.stage = 'error';
+        updateProgress(job, 0, 'error');
+        job.error = 'Token ungültig oder abgelaufen — bitte neu verifizieren.';
+        appendEvent(job, 'Token-Fehler.');
+        scheduleJobCleanup(job);
+        return res.json({ id });
+      }
+      let sessionCookie = decryptFromClient(encryptedSession) || null;
+      if (!sessionCookie) {
+        appendEvent(job, 'SC-Session wird geholt...');
+        sessionCookie = await fetchScSession(oauthToken);
+        if (!sessionCookie) {
+          appendEvent(job, 'Session-Cookie nicht verfügbar, Download wird trotzdem versucht...');
+        } else {
+          freshEncryptedSession = encryptForClient(sessionCookie);
+        }
+      }
       try {
-        cookiePath = await writeTempCookieFile(targetDir, scToken.trim());
+        cookiePath = await writeTempCookieFile(targetDir, oauthToken, sessionCookie);
       } catch {
         job.status = 'error';
         job.stage = 'error';
@@ -1003,7 +1024,7 @@ app.post('/api/download', async (req, res) => {
     }
   });
 
-  res.json({ id });
+  res.json({ id, ...(freshEncryptedSession ? { encryptedSession: freshEncryptedSession } : {}) });
 });
 
 app.post('/api/sc-verify', async (req, res) => {
