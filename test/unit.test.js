@@ -39,3 +39,51 @@ test('encryptForClient — gleicher Input erzeugt unterschiedlichen Ciphertext (
   const b = encryptForClient('value');
   assert.notEqual(a, b);
 });
+
+test('fetchScSession — gibt sessionCookie-String zurück bei Erfolg', async (t) => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: true,
+    headers: {
+      getSetCookie: () => [
+        'connect_session=1; Path=/; Domain=.soundcloud.com',
+        '_soundcloud_session="abc123xyz"; Max-Age=604800; Path=/; Secure; HttpOnly',
+        'soundcloud_session_hint=1; Path=/'
+      ]
+    }
+  });
+  const result = await fetchScSession('test-token');
+  assert.equal(result, 'abc123xyz');
+  global.fetch = originalFetch;
+});
+
+test('fetchScSession — gibt null zurück wenn _soundcloud_session fehlt', async (t) => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: true,
+    headers: { getSetCookie: () => ['connect_session=1; Path=/'] }
+  });
+  const result = await fetchScSession('test-token');
+  assert.equal(result, null);
+  global.fetch = originalFetch;
+});
+
+test('fetchScSession — gibt null zurück bei Netzwerkfehler', async (t) => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => { throw new Error('network error'); };
+  const result = await fetchScSession('test-token');
+  assert.equal(result, null);
+  global.fetch = originalFetch;
+});
+
+test('fetchScSession — gibt null zurück bei non-200 Antwort', async (t) => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: false,
+    status: 401,
+    headers: { getSetCookie: () => [] }
+  });
+  const result = await fetchScSession('test-token');
+  assert.equal(result, null);
+  global.fetch = originalFetch;
+});
