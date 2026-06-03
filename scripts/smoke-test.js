@@ -1,6 +1,13 @@
 const fs = require('fs/promises');
 const path = require('path');
-const { app, buildPublicClientConfig } = require('../server');
+const {
+  app,
+  buildPublicClientConfig,
+  fetchScSession,
+  encryptForClient,
+  decryptFromClient,
+  writeTempCookieFile
+} = require('../server');
 
 function collectRoutes(expressApp) {
   const router = expressApp._router;
@@ -24,6 +31,10 @@ function hasRoute(routes, method, routePath) {
 }
 
 async function main() {
+  if (typeof fetchScSession !== 'function') throw new Error('fetchScSession ist nicht exportiert.');
+  if (typeof encryptForClient !== 'function') throw new Error('encryptForClient ist nicht exportiert.');
+  if (typeof decryptFromClient !== 'function') throw new Error('decryptFromClient ist nicht exportiert.');
+
   const routes = collectRoutes(app);
   const publicConfig = buildPublicClientConfig();
   const indexHtml = await fs.readFile(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
