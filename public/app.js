@@ -80,6 +80,8 @@
     localStorage.setItem('sc_oauth_token_enc', encryptedToken);
     if (encryptedSession) {
       localStorage.setItem('sc_session_enc', encryptedSession);
+    } else {
+      localStorage.removeItem('sc_session_enc');
     }
   }
 
@@ -359,7 +361,7 @@
       if (!response.ok) throw new Error(data.error || 'Download konnte nicht gestartet werden.');
 
       if (data.encryptedSession && encryptedToken) {
-        localStorage.setItem('sc_session_enc', data.encryptedSession);
+        saveEncryptedCredentials(encryptedToken, data.encryptedSession);
       }
 
       await pollStatus(data.id);
