@@ -8,6 +8,7 @@ cookies/*.cookies
 cookies/*.cookie
 .env
 .env.local
+docker/.env
 npm-debug.log*
 
 .superpowers/
