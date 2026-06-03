@@ -23,6 +23,7 @@ services:
       FFMPEG_X264_PRESET: ${FFMPEG_X264_PRESET:-medium}
       FFMPEG_X264_CRF: ${FFMPEG_X264_CRF:-23}
       FFMPEG_AAC_BITRATE: ${FFMPEG_AAC_BITRATE:-192}
+      SC_TEST_TRACK_URL: ${SC_TEST_TRACK_URL:-https://soundcloud.com/vinivicimusic/karma-extended-mix}
     volumes:
       - yt_tmp:/app/tmp
       - ../cookies:/app/cookies:ro
