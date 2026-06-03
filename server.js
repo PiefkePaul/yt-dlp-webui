@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
 const crypto = require('crypto');
+const { randomBytes, createCipheriv, createDecipheriv } = crypto;
 const { spawn } = require('child_process');
 const os = require('os');
 const archiver = require('archiver');
@@ -23,6 +24,8 @@ const PUBLIC_DEMO_MESSAGE = (process.env.PUBLIC_DEMO_MESSAGE || '').trim()
 // Alternativ: SC_TEST_TRACK_URL in .env setzen.
 // Verifiziert am 2026-06-03: Gibt ohne Token duration=30s zurück (Preview-geschützt).
 const SC_TEST_TRACK_URL = process.env.SC_TEST_TRACK_URL || 'https://soundcloud.com/vinivicimusic/karma-extended-mix';
+const SC_CLIENT_ID = process.env.SC_CLIENT_ID || 'i53MAi5VcJrq7u38ZL1SOZtDi17ds1A0';
+const SESSION_ENCRYPTION_KEY_HEX = (process.env.SESSION_ENCRYPTION_KEY || '').trim();
 const CORS_ALLOWED_ORIGINS = parseAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS);
 const SKIP_RUNTIME_CHECKS = normalizeBoolean(process.env.SKIP_RUNTIME_CHECKS, false);
 const SKIP_FFMPEG_PROBE = normalizeBoolean(process.env.SKIP_FFMPEG_PROBE, false);
@@ -88,6 +91,43 @@ function normalizeHwAccelPreference(value) {
 function resolvePathValue(value) {
   if (!value) return '';
   return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
+}
+
+function getEncryptionKeyBuffer() {
+  if (!SESSION_ENCRYPTION_KEY_HEX || SESSION_ENCRYPTION_KEY_HEX.length !== 64) {
+    throw new Error(
+      'SESSION_ENCRYPTION_KEY fehlt oder ungültig in .env\n' +
+      'Key generieren: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+    );
+  }
+  return Buffer.from(SESSION_ENCRYPTION_KEY_HEX, 'hex');
+}
+
+function encryptForClient(plaintext) {
+  const key = getEncryptionKeyBuffer();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${iv.toString('base64')}:${tag.toString('base64')}:${encrypted.toString('base64')}`;
+}
+
+function decryptFromClient(encrypted) {
+  try {
+    if (!encrypted || typeof encrypted !== 'string') return null;
+    const parts = encrypted.split(':');
+    if (parts.length !== 3) return null;
+    const [ivB64, tagB64, cipherB64] = parts;
+    const key = getEncryptionKeyBuffer();
+    const iv = Buffer.from(ivB64, 'base64');
+    const tag = Buffer.from(tagB64, 'base64');
+    const ciphertext = Buffer.from(cipherB64, 'base64');
+    const decipher = createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
 }
 
 function detectSource(url) {
@@ -1140,7 +1180,9 @@ module.exports = {
   detectSource,
   buildScArgs,
   buildYtArgs,
-  writeTempCookieFile
+  writeTempCookieFile,
+  encryptForClient,
+  decryptFromClient
 };
 
 if (require.main === module) {

@@ -12,3 +12,30 @@ const {
   fetchScSession,
   writeTempCookieFile
 } = require('../server');
+
+test('encryptForClient/decryptFromClient — Roundtrip', (t) => {
+  const plaintext = 'test-oauth-token-123';
+  const encrypted = encryptForClient(plaintext);
+  assert.equal(typeof encrypted, 'string');
+  assert.equal(encrypted.split(':').length, 3);
+  assert.equal(decryptFromClient(encrypted), plaintext);
+});
+
+test('decryptFromClient — manipulierter Ciphertext gibt null zurück', (t) => {
+  const encrypted = encryptForClient('some-value');
+  const tampered = encrypted.slice(0, -4) + 'XXXX';
+  assert.equal(decryptFromClient(tampered), null);
+});
+
+test('decryptFromClient — ungültige Inputs geben null zurück', (t) => {
+  assert.equal(decryptFromClient(''), null);
+  assert.equal(decryptFromClient(null), null);
+  assert.equal(decryptFromClient('kein:format'), null);
+  assert.equal(decryptFromClient(undefined), null);
+});
+
+test('encryptForClient — gleicher Input erzeugt unterschiedlichen Ciphertext (IV-Randomness)', (t) => {
+  const a = encryptForClient('value');
+  const b = encryptForClient('value');
+  assert.notEqual(a, b);
+});
