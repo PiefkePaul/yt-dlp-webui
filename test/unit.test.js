@@ -10,7 +10,8 @@ const {
   encryptForClient,
   decryptFromClient,
   fetchScSession,
-  writeTempCookieFile
+  writeTempCookieFile,
+  checkScTrackFormats
 } = require('../server');
 
 test('encryptForClient/decryptFromClient — Roundtrip', (t) => {
@@ -113,5 +114,69 @@ test('writeTempCookieFile — beide Cookies wenn sessionCookie übergeben', asyn
     assert.ok(content.includes('_soundcloud_session\tmy-session-abc'));
   } finally {
     await fsp.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('checkScTrackFormats — DRM-only transcodings → canDownload: false', async (t) => {
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        media: {
+          transcodings: [
+            { format: { protocol: 'cbc-encrypted-hls', mime_type: 'audio/ogg' } },
+            { format: { protocol: 'ctr-encrypted-hls', mime_type: 'audio/ogg' } }
+          ]
+        }
+      })
+    });
+    const result = await checkScTrackFormats('https://soundcloud.com/artist/track', 'test-token');
+    assert.deepEqual(result, { canDownload: false, reason: 'drm' });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('checkScTrackFormats — hls vorhanden → canDownload: true', async (t) => {
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        media: {
+          transcodings: [
+            { format: { protocol: 'hls', mime_type: 'audio/ogg' } },
+            { format: { protocol: 'cbc-encrypted-hls', mime_type: 'audio/ogg' } }
+          ]
+        }
+      })
+    });
+    const result = await checkScTrackFormats('https://soundcloud.com/artist/track', 'test-token');
+    assert.deepEqual(result, { canDownload: true });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('checkScTrackFormats — API-Netzwerkfehler → canDownload: true (fail-open)', async (t) => {
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = async () => { throw new Error('network error'); };
+    const result = await checkScTrackFormats('https://soundcloud.com/artist/track', 'test-token');
+    assert.deepEqual(result, { canDownload: true });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('checkScTrackFormats — non-200 Antwort → canDownload: true (fail-open)', async (t) => {
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = async () => ({ ok: false, status: 401 });
+    const result = await checkScTrackFormats('https://soundcloud.com/artist/track', 'test-token');
+    assert.deepEqual(result, { canDownload: true });
+  } finally {
+    global.fetch = originalFetch;
   }
 });
