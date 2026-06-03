@@ -23,10 +23,10 @@ Backend: Node.js/Express. Frontend: Vanilla JS + HTML.
 | SC-Download (öffentlich) | ✅ Fertig | Preflight-Check, Blockierung bei Preview-only |
 | SC Token-Verifikation | ✅ Fertig | `/api/sc-verify`, Go+-Erkennung, yt-dlp-Duration-Check |
 | SC Cookie-File (oauth_token) | ✅ Fertig | `writeTempCookieFile`, Netscape-Format |
-| SC Session-Cookie Fix | 🔄 In Arbeit | Option B: `fetchScSession` + Encryption |
-| Client-Side Credential Encryption | 🔄 In Arbeit | AES-256-GCM, localStorage nur Ciphertext |
-| Frontend Settings-Panel | ✅ Fertig (Basis) | Token-Input, Verify, SC-Banner |
-| Frontend Encryption-Integration | 📋 Geplant | encrypted localStorage, neue Request-Bodies |
+| SC Session-Cookie Fix | ✅ Fertig | `fetchScSession` + AES-256-GCM Encryption |
+| Client-Side Credential Encryption | ✅ Fertig | AES-256-GCM, localStorage nur Ciphertext |
+| SC Go+-Download | ❌ Nicht unterstützt | FairPlay DRM, proaktive Erkennung aktiv, Phase 2 geplant |
+| Frontend Settings-Modal | ✅ Fertig | Modal-Overlay, Token-Input, Verify, SC-Banner |
 
 ## Datenmodelle
 
@@ -72,25 +72,13 @@ Response: Datei-Download
 
 ## Offene Tasks
 
-- [ ] `fetchScSession(oauthToken)` implementieren
-- [ ] `encryptForClient` / `decryptFromClient` implementieren (AES-256-GCM)
-- [ ] `writeTempCookieFile` um sessionCookie-Parameter erweitern + 0o600
-- [ ] Cookie-Sofortlöschung nach yt-dlp-Exit (Erfolg + Fehler)
-- [ ] `SESSION_ENCRYPTION_KEY` Startup-Check
-- [ ] `/api/sc-verify` Response um encryptedToken + encryptedSession erweitern
-- [ ] `/api/download` auf encryptedToken/encryptedSession umstellen (sc-verify yt-dlp-Check: fetchScSession → writeTempCookieFile → yt-dlp → cleanup finally)
-- [ ] `public/app.js` — localStorage auf encrypted umstellen
-- [ ] `public/app.js` — Settings-UX anpassen (masked Token, kein Speichern ohne Verify)
-- [ ] `public/app.js` — Download-Request-Body anpassen
-- [ ] `.env.example` + `.env.template` um SC_CLIENT_ID + SESSION_ENCRYPTION_KEY ergänzen
-- [ ] Test-Protokoll aus Spec durchführen
+- [ ] Phase 2: Eigener SC-Downloader (direkter API-Zugriff, Go+-Support)
 
 ## Bekannte Probleme / Blocker
 
 | Problem | Ursache | Lösung |
 |---------|---------|--------|
-| SC Go+-Download schlägt fehl (404) | `_soundcloud_session`-Cookie fehlt in yt-dlp-Request | Option B: `fetchScSession` + Cookie-Anreicherung |
-| oauth_token im Klartext in localStorage | Kein Encryption-Layer | AES-256-GCM Server-seitig |
+| SC Go+-Download nicht möglich | Apple FairPlay DRM (`cbc-encrypted-hls`/`ctr-encrypted-hls`), yt-dlp kann nicht entschlüsseln | Phase 2: Eigener SC-Downloader geplant |
 
 ## Aenderungshistorie
 
@@ -98,3 +86,4 @@ Response: Datei-Download
 |---|---|
 | 2026-06-02 | Initiales Setup via bootstrap.ps1 |
 | 2026-06-03 | PFLICHTENHEFT befüllt nach Brainstorming-Session; Design-Spec erstellt und nach Self-Review präzisiert |
+| 2026-06-03 | Phase 1 abgeschlossen: DRM-Erkennung (`checkScTrackFormats`), Settings-Modal, Release v1.1.0 |
