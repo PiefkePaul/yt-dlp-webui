@@ -124,14 +124,11 @@
 
   function openSettingsModal() {
     settingsModal.classList.remove('hidden');
-    if (hasStoredCredentials()) {
-      scTokenInput.value = '';
-      scTokenInput.placeholder = '••••••••••••••';
-      scTokenSave.textContent = 'Token entfernen';
-    } else {
-      scTokenInput.placeholder = '2-123456-789012345-ABCDEFGH...';
-      scTokenSave.textContent = 'Speichern';
-    }
+    const hasCredentials = hasStoredCredentials();
+    scTokenInput.value = '';
+    scTokenInput.placeholder = hasCredentials ? '••••••••••••••' : '2-123456-789012345-ABCDEFGH...';
+    scTokenSave.textContent = 'Token entfernen';
+    scTokenSave.disabled = !hasCredentials;
   }
 
   function closeSettingsModal() {
@@ -279,7 +276,7 @@
     clearEncryptedCredentials();
     scTokenInput.value = '';
     scTokenInput.placeholder = '2-123456-789012345-ABCDEFGH...';
-    scTokenSave.textContent = 'Speichern';
+    scTokenSave.disabled = true;
     updateScBanner();
     scVerifyResult.textContent = 'Token entfernt.';
     scVerifyResult.className = 'verify-result ok';
@@ -317,6 +314,7 @@
           scTokenInput.value = '';
           scTokenInput.placeholder = '••••••••••••••';
           scTokenSave.textContent = 'Token entfernen';
+          scTokenSave.disabled = false;
           updateScBanner();
         }
       } else {
