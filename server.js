@@ -130,6 +130,25 @@ function decryptFromClient(encrypted) {
   }
 }
 
+async function fetchScSession(oauthToken) {
+  try {
+    const url = `https://api-auth.soundcloud.com/connect/session?client_id=${SC_CLIENT_ID}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: { access_token: oauthToken } })
+    });
+    if (!response.ok) return null;
+    const cookies = response.headers.getSetCookie();
+    const entry = cookies.find((c) => c.startsWith('_soundcloud_session='));
+    if (!entry) return null;
+    const raw = entry.split(';')[0].replace('_soundcloud_session=', '');
+    return raw.startsWith('"') ? raw.slice(1, -1) : raw;
+  } catch {
+    return null;
+  }
+}
+
 function detectSource(url) {
   try {
     const hostname = new URL(url).hostname;
@@ -1173,16 +1192,9 @@ function logStartupSummary(port) {
 }
 
 module.exports = {
-  app,
-  startServer,
-  buildPublicClientConfig,
-  verifyRequiredBinaries,
-  detectSource,
-  buildScArgs,
-  buildYtArgs,
-  writeTempCookieFile,
-  encryptForClient,
-  decryptFromClient
+  app, startServer, buildPublicClientConfig, verifyRequiredBinaries,
+  detectSource, buildScArgs, buildYtArgs,
+  writeTempCookieFile, fetchScSession, encryptForClient, decryptFromClient
 };
 
 if (require.main === module) {
