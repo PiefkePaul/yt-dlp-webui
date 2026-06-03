@@ -21,7 +21,8 @@ const PUBLIC_DEMO_MESSAGE = (process.env.PUBLIC_DEMO_MESSAGE || '').trim()
 // Go+-geschützter Track für Token-Verifikation. Muss ein Track sein,
 // der ohne Abo als 30s-Preview ausgeliefert wird.
 // Alternativ: SC_TEST_TRACK_URL in .env setzen.
-const SC_TEST_TRACK_URL = process.env.SC_TEST_TRACK_URL || '';
+// Verifiziert am 2026-06-03: Gibt ohne Token duration=30s zurück (Preview-geschützt).
+const SC_TEST_TRACK_URL = process.env.SC_TEST_TRACK_URL || 'https://soundcloud.com/vinivicimusic/karma-extended-mix';
 const CORS_ALLOWED_ORIGINS = parseAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS);
 const SKIP_RUNTIME_CHECKS = normalizeBoolean(process.env.SKIP_RUNTIME_CHECKS, false);
 const SKIP_FFMPEG_PROBE = normalizeBoolean(process.env.SKIP_FFMPEG_PROBE, false);
