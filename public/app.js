@@ -69,16 +69,27 @@
     }
   }
 
-  function loadScToken() {
-    return localStorage.getItem('sc_oauth_token') || '';
+  function loadEncryptedCredentials() {
+    return {
+      encryptedToken: localStorage.getItem('sc_oauth_token_enc') || '',
+      encryptedSession: localStorage.getItem('sc_session_enc') || ''
+    };
   }
 
-  function saveScToken(token) {
-    if (token) {
-      localStorage.setItem('sc_oauth_token', token);
-    } else {
-      localStorage.removeItem('sc_oauth_token');
+  function saveEncryptedCredentials(encryptedToken, encryptedSession) {
+    localStorage.setItem('sc_oauth_token_enc', encryptedToken);
+    if (encryptedSession) {
+      localStorage.setItem('sc_session_enc', encryptedSession);
     }
+  }
+
+  function clearEncryptedCredentials() {
+    localStorage.removeItem('sc_oauth_token_enc');
+    localStorage.removeItem('sc_session_enc');
+  }
+
+  function hasStoredCredentials() {
+    return Boolean(localStorage.getItem('sc_oauth_token_enc'));
   }
 
   function updateUiForSource(isSoundCloud) {
@@ -92,7 +103,7 @@
         formatSelect.value = 'mp3';
         fillQualityOptions('mp3');
       }
-      const hasToken = Boolean(loadScToken());
+      const hasToken = hasStoredCredentials();
       scBanner.classList.toggle('hidden', hasToken);
     } else {
       if (mp4Option) mp4Option.style.display = '';
@@ -229,7 +240,8 @@
   settingsToggle.addEventListener('click', () => {
     settingsPanel.classList.toggle('hidden');
     if (!settingsPanel.classList.contains('hidden')) {
-      scTokenInput.value = loadScToken();
+      scTokenInput.value = '';
+      scTokenInput.placeholder = hasStoredCredentials() ? '••••••••••••••' : 'OAuth Token eingeben';
       scVerifyResult.textContent = '';
       scVerifyResult.className = 'verify-result';
     }
@@ -237,18 +249,20 @@
 
   scBannerTokenBtn.addEventListener('click', () => {
     settingsPanel.classList.remove('hidden');
-    scTokenInput.value = loadScToken();
+    scTokenInput.value = '';
+    scTokenInput.placeholder = hasStoredCredentials() ? '••••••••••••••' : 'OAuth Token eingeben';
     scVerifyResult.textContent = '';
     scVerifyResult.className = 'verify-result';
     scTokenInput.focus();
   });
 
   scTokenSave.addEventListener('click', () => {
-    const token = scTokenInput.value.trim();
-    saveScToken(token);
+    clearEncryptedCredentials();
+    scTokenInput.value = '';
+    scTokenInput.placeholder = 'OAuth Token eingeben';
     const isSC = detectSoundCloud(document.getElementById('url').value);
     updateUiForSource(isSC);
-    scVerifyResult.textContent = token ? 'Token gespeichert.' : 'Token entfernt.';
+    scVerifyResult.textContent = 'Token entfernt.';
     scVerifyResult.className = 'verify-result ok';
   });
 
@@ -279,6 +293,13 @@
         const goLabel = data.goPlus ? ' · SC Go+: ✓' : '';
         scVerifyResult.textContent = `✓ Token gültig · Nutzer: ${data.username}${goLabel}`;
         scVerifyResult.className = 'verify-result ok';
+        if (data.encryptedToken) {
+          saveEncryptedCredentials(data.encryptedToken, data.encryptedSession || '');
+          scTokenInput.value = '';
+          scTokenInput.placeholder = '••••••••••••••';
+          const isSC = detectSoundCloud(document.getElementById('url').value);
+          updateUiForSource(isSC);
+        }
       } else {
         scVerifyResult.textContent = `✗ ${data.error || 'Token ungültig.'}`;
         scVerifyResult.className = 'verify-result error';
@@ -320,7 +341,7 @@
     try {
       const urlInput = document.getElementById('url').value;
       const isSC = detectSoundCloud(urlInput);
-      const scToken = isSC ? loadScToken() : undefined;
+      const { encryptedToken, encryptedSession } = isSC ? loadEncryptedCredentials() : {};
 
       const response = await fetch(createApiUrl('/api/download'), {
         method: 'POST',
@@ -329,12 +350,18 @@
           url: urlInput,
           format: formatSelect.value,
           quality: qualitySelect.value,
-          ...(scToken ? { scToken } : {})
+          ...(encryptedToken ? { encryptedToken } : {}),
+          ...(encryptedSession ? { encryptedSession } : {})
         })
       });
 
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Download konnte nicht gestartet werden.');
+
+      if (data.encryptedSession && encryptedToken) {
+        localStorage.setItem('sc_session_enc', data.encryptedSession);
+      }
+
       await pollStatus(data.id);
     } catch (error) {
       stateText.innerHTML = `<span class="error">${error.message}</span>`;
@@ -343,8 +370,7 @@
     }
   });
 
-  const savedToken = loadScToken();
-  if (savedToken) {
-    scTokenInput.value = savedToken;
+  if (hasStoredCredentials()) {
+    scTokenInput.placeholder = '••••••••••••••';
   }
 }());
