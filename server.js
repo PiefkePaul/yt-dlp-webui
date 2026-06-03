@@ -159,13 +159,17 @@ function detectSource(url) {
   }
 }
 
-async function writeTempCookieFile(dirPath, token) {
+async function writeTempCookieFile(dirPath, token, sessionCookie = null) {
   const cookiePath = path.join(dirPath, 'sc.cookies');
-  const content = [
+  const expire = Math.floor(Date.now() / 1000) + 604800;
+  const lines = [
     '# Netscape HTTP Cookie File',
     `.soundcloud.com\tTRUE\t/\tTRUE\t2147483647\toauth_token\t${token}`
-  ].join('\n');
-  await fsp.writeFile(cookiePath, content, 'utf8');
+  ];
+  if (sessionCookie) {
+    lines.push(`.soundcloud.com\tTRUE\t/\tTRUE\t${expire}\t_soundcloud_session\t${sessionCookie}`);
+  }
+  await fsp.writeFile(cookiePath, lines.join('\n'), { encoding: 'utf8', mode: 0o600 });
   return cookiePath;
 }
 
@@ -874,6 +878,11 @@ app.post('/api/download', async (req, res) => {
   });
 
   child.on('close', async (code) => {
+    // Cookie-Datei sofort löschen — als erstes, vor jeder weiteren Verarbeitung
+    if (cookiePath) {
+      await fsp.rm(cookiePath, { force: true }).catch(() => {});
+    }
+
     try {
       if (code !== 0) {
         job.status = 'error';
@@ -1117,6 +1126,8 @@ app.get('/health', (_req, res) => {
 });
 
 async function startServer(options = {}) {
+  getEncryptionKeyBuffer(); // wirft wenn SESSION_ENCRYPTION_KEY fehlt oder ungültig
+
   runtimeState.tmpDir = resolvePathValue(options.tmpDir || runtimeState.tmpDir);
   runtimeState.jobTtlMs = Number(options.jobTtlMs || runtimeState.jobTtlMs);
   runtimeState.runtimeChecksSkipped = options.skipRuntimeChecks ?? SKIP_RUNTIME_CHECKS;
