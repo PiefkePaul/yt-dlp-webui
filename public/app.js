@@ -256,6 +256,7 @@
   }
 
   fillQualityOptions('mp3');
+  updateScBanner();
   formatSelect.addEventListener('change', () => fillQualityOptions(formatSelect.value));
 
   document.getElementById('url').addEventListener('input', (e) => {
@@ -270,7 +271,7 @@
     if (e.target === settingsModal) closeSettingsModal();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeSettingsModal();
+    if (e.key === 'Escape' && !settingsModal.classList.contains('hidden')) closeSettingsModal();
   });
   scBannerTokenBtn.addEventListener('click', openSettingsModal);
 
