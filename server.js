@@ -149,6 +149,26 @@ async function fetchScSession(oauthToken) {
   }
 }
 
+async function checkScTrackFormats(trackUrl, oauthToken) {
+  try {
+    const resolveUrl = `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(trackUrl)}&client_id=${SC_CLIENT_ID}`;
+    const response = await fetch(resolveUrl, {
+      headers: { 'Authorization': `OAuth ${oauthToken}` }
+    });
+    if (!response.ok) return { canDownload: true };
+    const track = await response.json();
+    const transcodings = track?.media?.transcodings;
+    if (!Array.isArray(transcodings) || transcodings.length === 0) return { canDownload: true };
+    const hasUnencrypted = transcodings.some(
+      (t) => t?.format?.protocol === 'hls' || t?.format?.protocol === 'progressive'
+    );
+    if (hasUnencrypted) return { canDownload: true };
+    return { canDownload: false, reason: 'drm' };
+  } catch {
+    return { canDownload: true };
+  }
+}
+
 function detectSource(url) {
   try {
     const hostname = new URL(url).hostname;
@@ -848,6 +868,16 @@ app.post('/api/download', async (req, res) => {
         scheduleJobCleanup(job);
         return res.json({ id });
       }
+      const drmCheck = await checkScTrackFormats(url, oauthToken);
+      if (!drmCheck.canDownload) {
+        job.status = 'error';
+        job.stage = 'error';
+        updateProgress(job, 0, 'error');
+        job.error = 'Dieser Track ist DRM-geschützt und kann derzeit nicht heruntergeladen werden. Go+-Support ist in Vorbereitung.';
+        appendEvent(job, 'DRM-geschützter Track erkannt.');
+        scheduleJobCleanup(job);
+        return res.json({ id });
+      }
       let sessionCookie = decryptFromClient(encryptedSession) || null;
       if (!sessionCookie) {
         appendEvent(job, 'SC-Session wird geholt...');
@@ -908,7 +938,12 @@ app.post('/api/download', async (req, res) => {
       if (code !== 0) {
         job.status = 'error';
         job.stage = 'error';
-        job.error = 'yt-dlp wurde mit einem Fehler beendet.';
+        const rawText = job.rawLog.join('\n');
+        if (detectSource(url) === 'soundcloud' && rawText.includes('404')) {
+          job.error = 'Download fehlgeschlagen — der Track könnte DRM-geschützt sein. Bitte erneut versuchen oder einen anderen Track wählen.';
+        } else {
+          job.error = 'yt-dlp wurde mit einem Fehler beendet.';
+        }
         appendEvent(job, 'Download fehlgeschlagen.');
         scheduleJobCleanup(job);
         return;
@@ -1237,7 +1272,8 @@ function logStartupSummary(port) {
 module.exports = {
   app, startServer, buildPublicClientConfig, verifyRequiredBinaries,
   detectSource, buildScArgs, buildYtArgs,
-  writeTempCookieFile, fetchScSession, encryptForClient, decryptFromClient
+  writeTempCookieFile, fetchScSession, encryptForClient, decryptFromClient,
+  checkScTrackFormats
 };
 
 if (require.main === module) {
