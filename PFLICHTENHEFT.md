@@ -50,7 +50,8 @@ sc_session_enc       — AES-256-GCM-verschlüsselter _soundcloud_session-Wert
 .soundcloud.com  TRUE  /  TRUE  2147483647        oauth_token          <token>
 .soundcloud.com  TRUE  /  TRUE  <now+604800>       _soundcloud_session  <value>
 ```
-Permissions: 0o600. Wird sofort nach yt-dlp-Exit gelöscht.
+Permissions: 0o600. Wird **am Anfang** des `child.on('close',...)`-Handlers gelöscht —
+als erstes, vor jeder weiteren Job-Verarbeitung — auf Erfolgs- UND Fehlerpfad.
 
 ## API / Schnittstellen
 
@@ -60,7 +61,8 @@ Response: `{ valid, username?, goPlus?, error?, encryptedToken?, encryptedSessio
 
 ### `POST /api/download`
 Request: `{ url, format, quality, encryptedToken?, encryptedSession? }`  
-Response: `{ id, encryptedSession? }`
+Response (Start): `{ id, encryptedSession? }` — `encryptedSession` nur wenn Server frisch gefetchte Session zurückgibt.  
+Frontend speichert neuen `encryptedSession` aus der **Start-Response** (nicht aus Polling).
 
 ### `GET /api/status/:id`
 Response: `{ id, status, stage, progress, error, log, rawLog, downloadName, downloadUrl, createdAt, completedAt, expiresAt }`
@@ -76,7 +78,7 @@ Response: Datei-Download
 - [ ] Cookie-Sofortlöschung nach yt-dlp-Exit (Erfolg + Fehler)
 - [ ] `SESSION_ENCRYPTION_KEY` Startup-Check
 - [ ] `/api/sc-verify` Response um encryptedToken + encryptedSession erweitern
-- [ ] `/api/download` auf encryptedToken/encryptedSession umstellen
+- [ ] `/api/download` auf encryptedToken/encryptedSession umstellen (sc-verify yt-dlp-Check: fetchScSession → writeTempCookieFile → yt-dlp → cleanup finally)
 - [ ] `public/app.js` — localStorage auf encrypted umstellen
 - [ ] `public/app.js` — Settings-UX anpassen (masked Token, kein Speichern ohne Verify)
 - [ ] `public/app.js` — Download-Request-Body anpassen
@@ -95,4 +97,4 @@ Response: Datei-Download
 | Datum | Aenderung |
 |---|---|
 | 2026-06-02 | Initiales Setup via bootstrap.ps1 |
-| 2026-06-03 | PFLICHTENHEFT befüllt nach Brainstorming-Session; Design-Spec erstellt |
+| 2026-06-03 | PFLICHTENHEFT befüllt nach Brainstorming-Session; Design-Spec erstellt und nach Self-Review präzisiert |
