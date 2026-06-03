@@ -119,21 +119,55 @@
       background: var(--panel-2);
       border: 1px solid var(--border);
       color: var(--muted);
+      border-radius: 8px;
+      padding: 6px 10px;
       font-size: 0.85rem;
       min-width: 0;
-      padding: 8px 14px;
+      width: auto;
+      cursor: pointer;
       flex-shrink: 0;
     }
     .settings-toggle:hover { color: var(--text); }
-    .settings-panel {
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      background: rgba(15, 23, 42, 0.8);
-      padding: 16px;
-      display: grid;
-      gap: 12px;
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      backdrop-filter: blur(4px);
     }
-    .settings-panel .label {
+    .modal-overlay.hidden { display: none; }
+    .modal-box {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      width: min(420px, 90vw);
+      display: grid;
+      gap: 14px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 700;
+      font-size: 1rem;
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 1rem;
+      cursor: pointer;
+      min-width: 0;
+      width: auto;
+      padding: 2px 6px;
+    }
+    .modal-close:hover { color: var(--text); }
+    .label {
       font-size: 0.78rem;
       color: var(--muted);
       text-transform: uppercase;
@@ -222,26 +256,31 @@
         <h1>yt-dlp Download-Server</h1>
         <p>Selbst hostbarer Download-Server fuer <code>yt-dlp</code> mit Weboberflaeche fuer Einzelvideos und Playlists.</p>
       </div>
-      <button id="settingsToggle" type="button" class="settings-toggle">⚙ Einstellungen</button>
+      <button id="settingsToggle" type="button" class="settings-toggle" aria-label="Einstellungen">⚙</button>
     </div>
 
-    <section id="settingsPanel" class="settings-panel hidden">
-      <div class="label">SoundCloud-Token</div>
-      <p class="muted" style="margin:0;font-size:0.85rem;line-height:1.5">
-        Benötigt für private, altersgeschützte oder Go+-Tracks.<br>
-        Zu finden in den Browser-DevTools:<br>
-        <code>Application → Local Storage → soundcloud.com → oauth_token</code>
-      </p>
-      <div class="settings-row">
-        <input id="scTokenInput" type="password" placeholder="2-123456-789012345-ABCDEFGH..." />
-        <button id="scTokenSave" type="button">Speichern</button>
-        <button id="scTokenVerify" type="button" class="secondary" style="min-width:0">Prüfen</button>
+    <div id="settingsModal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+      <div class="modal-box">
+        <div class="modal-header">
+          <span>⚙ Einstellungen</span>
+          <button id="settingsClose" type="button" class="modal-close" aria-label="Schließen">✕</button>
+        </div>
+        <div class="label">SoundCloud-Token</div>
+        <p class="muted" style="margin:0;font-size:0.82rem;line-height:1.5">
+          Benötigt für private oder altersgeschützte Tracks.<br>
+          <code>DevTools → Local Storage → soundcloud.com → oauth_token</code>
+        </p>
+        <div class="settings-row">
+          <input id="scTokenInput" type="password" placeholder="2-123456-789012345-ABCDEFGH..." />
+          <button id="scTokenSave" type="button">Speichern</button>
+          <button id="scTokenVerify" type="button" class="secondary" style="min-width:0">Prüfen</button>
+        </div>
+        <div id="scVerifyResult" class="verify-result"></div>
+        <p class="muted" style="margin:0;font-size:0.78rem">
+          Token wird nur lokal im Browser gespeichert — nie dauerhaft auf dem Server.
+        </p>
       </div>
-      <div id="scVerifyResult" class="verify-result"></div>
-      <p class="muted" style="margin:0;font-size:0.78rem">
-        Token wird nur im Browser gespeichert (localStorage) — nie dauerhaft auf dem Server.
-      </p>
-    </section>
+    </div>
 
     <section id="modeBanner" class="banner hidden">
       <strong>Betriebsmodus</strong>
