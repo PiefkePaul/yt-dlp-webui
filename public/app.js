@@ -48,7 +48,8 @@
   const modeBannerText = document.getElementById('modeBannerText');
   const apiInfo = document.getElementById('apiInfo');
   const settingsToggle = document.getElementById('settingsToggle');
-  const settingsPanel = document.getElementById('settingsPanel');
+  const settingsModal = document.getElementById('settingsModal');
+  const settingsClose = document.getElementById('settingsClose');
   const scTokenInput = document.getElementById('scTokenInput');
   const scTokenSave = document.getElementById('scTokenSave');
   const scTokenVerify = document.getElementById('scTokenVerify');
@@ -105,8 +106,6 @@
         formatSelect.value = 'mp3';
         fillQualityOptions('mp3');
       }
-      const hasToken = hasStoredCredentials();
-      scBanner.classList.toggle('hidden', hasToken);
     } else {
       if (mp4Option) mp4Option.style.display = '';
       if (originalOption) originalOption.style.display = 'none';
@@ -114,8 +113,32 @@
         formatSelect.value = 'mp3';
         fillQualityOptions('mp3');
       }
-      scBanner.classList.add('hidden');
     }
+  }
+
+  function updateScBanner() {
+    const url = document.getElementById('url').value;
+    const needsBanner = detectSoundCloud(url) && !hasStoredCredentials();
+    scBanner.classList.toggle('hidden', !needsBanner);
+  }
+
+  function openSettingsModal() {
+    settingsModal.classList.remove('hidden');
+    if (hasStoredCredentials()) {
+      scTokenInput.value = '';
+      scTokenInput.placeholder = '••••••••••••••';
+      scTokenSave.textContent = 'Token entfernen';
+    } else {
+      scTokenInput.placeholder = '2-123456-789012345-ABCDEFGH...';
+      scTokenSave.textContent = 'Speichern';
+    }
+  }
+
+  function closeSettingsModal() {
+    settingsModal.classList.add('hidden');
+    scTokenInput.value = '';
+    scVerifyResult.textContent = '';
+    scVerifyResult.className = 'verify-result';
   }
 
   function fillQualityOptions(format) {
@@ -236,34 +259,27 @@
   formatSelect.addEventListener('change', () => fillQualityOptions(formatSelect.value));
 
   document.getElementById('url').addEventListener('input', (e) => {
-    updateUiForSource(detectSoundCloud(e.target.value));
+    const isSC = detectSoundCloud(e.target.value);
+    updateUiForSource(isSC);
+    updateScBanner();
   });
 
-  settingsToggle.addEventListener('click', () => {
-    settingsPanel.classList.toggle('hidden');
-    if (!settingsPanel.classList.contains('hidden')) {
-      scTokenInput.value = '';
-      scTokenInput.placeholder = hasStoredCredentials() ? '••••••••••••••' : 'OAuth Token eingeben';
-      scVerifyResult.textContent = '';
-      scVerifyResult.className = 'verify-result';
-    }
+  settingsToggle.addEventListener('click', openSettingsModal);
+  settingsClose.addEventListener('click', closeSettingsModal);
+  settingsModal.addEventListener('click', (e) => {
+    if (e.target === settingsModal) closeSettingsModal();
   });
-
-  scBannerTokenBtn.addEventListener('click', () => {
-    settingsPanel.classList.remove('hidden');
-    scTokenInput.value = '';
-    scTokenInput.placeholder = hasStoredCredentials() ? '••••••••••••••' : 'OAuth Token eingeben';
-    scVerifyResult.textContent = '';
-    scVerifyResult.className = 'verify-result';
-    scTokenInput.focus();
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSettingsModal();
   });
+  scBannerTokenBtn.addEventListener('click', openSettingsModal);
 
   scTokenSave.addEventListener('click', () => {
     clearEncryptedCredentials();
     scTokenInput.value = '';
-    scTokenInput.placeholder = 'OAuth Token eingeben';
-    const isSC = detectSoundCloud(document.getElementById('url').value);
-    updateUiForSource(isSC);
+    scTokenInput.placeholder = '2-123456-789012345-ABCDEFGH...';
+    scTokenSave.textContent = 'Speichern';
+    updateScBanner();
     scVerifyResult.textContent = 'Token entfernt.';
     scVerifyResult.className = 'verify-result ok';
   });
@@ -299,8 +315,8 @@
           saveEncryptedCredentials(data.encryptedToken, data.encryptedSession || '');
           scTokenInput.value = '';
           scTokenInput.placeholder = '••••••••••••••';
-          const isSC = detectSoundCloud(document.getElementById('url').value);
-          updateUiForSource(isSC);
+          scTokenSave.textContent = 'Token entfernen';
+          updateScBanner();
         }
       } else {
         scVerifyResult.textContent = `✗ ${data.error || 'Token ungültig.'}`;
