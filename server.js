@@ -1056,12 +1056,15 @@ app.post('/api/sc-verify', async (req, res) => {
     return res.json({ valid: false, error: 'SC-API nicht erreichbar.' });
   }
 
-  // Schritt 2: yt-dlp Duration-Check (nur wenn TEST_URL konfiguriert)
+  // Schritt 2: Session-Cookie einmalig holen (für yt-dlp-Check und Response)
+  const sessionCookie = await fetchScSession(trimmedToken);
+
+  // Schritt 3: yt-dlp Duration-Check (nur wenn TEST_URL konfiguriert)
   if (SC_TEST_TRACK_URL) {
     let verifyTmpDir;
     try {
       verifyTmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sc-verify-'));
-      const tempCookiePath = await writeTempCookieFile(verifyTmpDir, trimmedToken);
+      const tempCookiePath = await writeTempCookieFile(verifyTmpDir, trimmedToken, sessionCookie);
 
       const result = await runProcessCapture('yt-dlp', [
         '--dump-json', '--no-playlist', '--no-warnings',
@@ -1085,7 +1088,17 @@ app.post('/api/sc-verify', async (req, res) => {
     }
   }
 
-  return res.json({ valid: true, username, goPlus });
+  // Schritt 4: Token + Session verschlüsseln und zurückgeben
+  const encryptedToken = encryptForClient(trimmedToken);
+  const encryptedSession = sessionCookie ? encryptForClient(sessionCookie) : undefined;
+
+  return res.json({
+    valid: true,
+    username,
+    goPlus,
+    encryptedToken,
+    ...(encryptedSession !== undefined ? { encryptedSession } : {})
+  });
 });
 
 app.get('/api/status/:id', (req, res) => {
