@@ -87,3 +87,31 @@ test('fetchScSession — gibt null zurück bei non-200 Antwort', async (t) => {
   assert.equal(result, null);
   global.fetch = originalFetch;
 });
+
+test('writeTempCookieFile — nur oauth_token wenn kein sessionCookie', async (t) => {
+  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'test-cookies-'));
+  try {
+    const cookiePath = await writeTempCookieFile(tmpDir, 'my-token');
+    const content = await fsp.readFile(cookiePath, 'utf8');
+    const lines = content.trim().split('\n');
+    assert.equal(lines.length, 2);
+    assert.ok(content.includes('oauth_token\tmy-token'));
+    assert.ok(!content.includes('_soundcloud_session'));
+  } finally {
+    await fsp.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('writeTempCookieFile — beide Cookies wenn sessionCookie übergeben', async (t) => {
+  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'test-cookies-'));
+  try {
+    const cookiePath = await writeTempCookieFile(tmpDir, 'my-token', 'my-session-abc');
+    const content = await fsp.readFile(cookiePath, 'utf8');
+    const lines = content.trim().split('\n');
+    assert.equal(lines.length, 3);
+    assert.ok(content.includes('oauth_token\tmy-token'));
+    assert.ok(content.includes('_soundcloud_session\tmy-session-abc'));
+  } finally {
+    await fsp.rm(tmpDir, { recursive: true, force: true });
+  }
+});
