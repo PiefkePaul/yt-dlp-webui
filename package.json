@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "test": "node --test",
     "check": "node --check server.js && node --check public/app.js && node --check scripts/build-pages.js && node --check scripts/build-release.js && node --check scripts/smoke-test.js",
     "smoke": "node scripts/smoke-test.js",
     "pages:build": "node scripts/build-pages.js",
