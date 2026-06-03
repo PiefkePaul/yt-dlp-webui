@@ -939,7 +939,7 @@ app.post('/api/download', async (req, res) => {
         job.status = 'error';
         job.stage = 'error';
         const rawText = job.rawLog.join('\n');
-        if (detectSource(url) === 'soundcloud' && rawText.includes('404')) {
+        if (detectSource(url) === 'soundcloud' && rawText.includes('HTTP Error 404')) {
           job.error = 'Download fehlgeschlagen — der Track könnte DRM-geschützt sein. Bitte erneut versuchen oder einen anderen Track wählen.';
         } else {
           job.error = 'yt-dlp wurde mit einem Fehler beendet.';

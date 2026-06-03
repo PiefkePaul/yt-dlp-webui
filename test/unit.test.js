@@ -180,3 +180,23 @@ test('checkScTrackFormats — non-200 Antwort → canDownload: true (fail-open)'
     global.fetch = originalFetch;
   }
 });
+
+test('checkScTrackFormats — progressive vorhanden → canDownload: true', async (t) => {
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        media: {
+          transcodings: [
+            { format: { protocol: 'progressive', mime_type: 'audio/mpeg' } }
+          ]
+        }
+      })
+    });
+    const result = await checkScTrackFormats('https://soundcloud.com/artist/track', 'test-token');
+    assert.deepEqual(result, { canDownload: true });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
