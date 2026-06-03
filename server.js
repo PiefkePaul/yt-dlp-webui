@@ -950,7 +950,7 @@ app.post('/api/sc-verify', async (req, res) => {
   let username;
   let goPlus = false;
   try {
-    const scRes = await fetch('https://api.soundcloud.com/me', {
+    const scRes = await fetch('https://api-v2.soundcloud.com/me', {
       headers: { 'Authorization': `OAuth ${trimmedToken}` }
     });
 
@@ -960,9 +960,8 @@ app.post('/api/sc-verify', async (req, res) => {
 
     const data = await scRes.json();
     username = data.username || data.permalink || 'Unbekannt';
-    const plan = (data.plan || '').toLowerCase();
-    const productName = ((data.subscription || {}).product || {}).name || '';
-    goPlus = plan.includes('go') || productName.toLowerCase().includes('go');
+    const consumerProductId = ((data.consumer_subscription || {}).product || {}).id || '';
+    goPlus = consumerProductId.includes('high-tier') || consumerProductId.includes('go');
   } catch {
     return res.json({ valid: false, error: 'SC-API nicht erreichbar.' });
   }
