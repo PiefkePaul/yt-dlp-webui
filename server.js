@@ -1059,32 +1059,30 @@ app.post('/api/sc-verify', async (req, res) => {
   // Schritt 2: Session-Cookie einmalig holen (für yt-dlp-Check und Response)
   const sessionCookie = await fetchScSession(trimmedToken);
 
-  // Schritt 3: yt-dlp Duration-Check (nur wenn TEST_URL konfiguriert)
-  if (SC_TEST_TRACK_URL) {
-    let verifyTmpDir;
-    try {
-      verifyTmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sc-verify-'));
-      const tempCookiePath = await writeTempCookieFile(verifyTmpDir, trimmedToken, sessionCookie);
+  // Schritt 3: yt-dlp Duration-Check (SC_TEST_TRACK_URL hat immer einen Wert)
+  let verifyTmpDir;
+  try {
+    verifyTmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sc-verify-'));
+    const tempCookiePath = await writeTempCookieFile(verifyTmpDir, trimmedToken, sessionCookie);
 
-      const result = await runProcessCapture('yt-dlp', [
-        '--dump-json', '--no-playlist', '--no-warnings',
-        '--cookies', tempCookiePath,
-        SC_TEST_TRACK_URL
-      ]);
+    const result = await runProcessCapture('yt-dlp', [
+      '--dump-json', '--no-playlist', '--no-warnings',
+      '--cookies', tempCookiePath,
+      SC_TEST_TRACK_URL
+    ]);
 
-      const info = JSON.parse(result.stdout.trim());
-      if (typeof info.duration === 'number' && info.duration <= 35) {
-        return res.json({
-          valid: false,
-          error: 'Token gültig, aber kein Zugriff auf Go+-Tracks — nur 30s-Preview verfügbar.'
-        });
-      }
-    } catch {
-      // yt-dlp-Check fehlgeschlagen → /me war erfolgreich, trotzdem valid
-    } finally {
-      if (verifyTmpDir) {
-        await fsp.rm(verifyTmpDir, { recursive: true, force: true }).catch(() => {});
-      }
+    const info = JSON.parse(result.stdout.trim());
+    if (typeof info.duration === 'number' && info.duration <= 35) {
+      return res.json({
+        valid: false,
+        error: 'Token gültig, aber kein Zugriff auf Go+-Tracks — nur 30s-Preview verfügbar.'
+      });
+    }
+  } catch {
+    // yt-dlp-Check fehlgeschlagen → /me war erfolgreich, trotzdem valid
+  } finally {
+    if (verifyTmpDir) {
+      await fsp.rm(verifyTmpDir, { recursive: true, force: true }).catch(() => {});
     }
   }
 
