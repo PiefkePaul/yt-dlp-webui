@@ -18,7 +18,8 @@ const {
   buildPublicClientConfig,
   buildMp3ConvertArgs,
   collectTrackMetadata,
-  stripKnownExtension
+  stripKnownExtension,
+  zipDirectory
 } = require('../server');
 
 test('encryptForClient/decryptFromClient — Roundtrip', (t) => {
@@ -543,4 +544,24 @@ test('collectTrackMetadata — info.json ohne Thumbnail funktioniert', (t) => {
   const map = collectTrackMetadata(names, '/tmp/job');
   assert.equal(map.get('Track').infoPath, path.join('/tmp/job', 'Track.info.json'));
   assert.ok(!map.get('Track').thumbnailPath);
+});
+
+test('zipDirectory — schließt sc.cookies immer aus, unabhängig von excludeFileName', async (t) => {
+  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'test-zip-'));
+  try {
+    await fsp.writeFile(path.join(tmpDir, 'track.mp3'), 'dummy-audio-content');
+    await fsp.writeFile(path.join(tmpDir, 'sc.cookies'), 'oauth_token\tsecret-token-value');
+
+    const zipName = 'out.zip';
+    const zipPath = path.join(tmpDir, zipName);
+    await zipDirectory(tmpDir, zipPath, zipName);
+
+    const zipBuffer = await fsp.readFile(zipPath);
+    const zipText = zipBuffer.toString('latin1');
+
+    assert.ok(zipText.includes('track.mp3'), 'ZIP sollte die Mediendatei enthalten');
+    assert.ok(!zipText.includes('sc.cookies'), 'ZIP darf die Cookie-Datei nicht enthalten');
+  } finally {
+    await fsp.rm(tmpDir, { recursive: true, force: true });
+  }
 });

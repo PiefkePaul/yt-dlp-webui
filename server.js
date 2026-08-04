@@ -852,7 +852,7 @@ async function zipDirectory(sourceDir, outPath, excludeFileName = null) {
     archive.glob('**/*', {
       cwd: sourceDir,
       nodir: true,
-      ignore: excludeFileName ? [excludeFileName] : []
+      ignore: excludeFileName ? [excludeFileName, 'sc.cookies'] : ['sc.cookies']
     });
 
     archive.finalize();
@@ -1410,7 +1410,7 @@ module.exports = {
   detectSource, buildScArgs, buildYtArgs,
   writeTempCookieFile, fetchScSession, encryptForClient, decryptFromClient,
   checkScTrackFormats, buildMp3ConvertArgs,
-  collectTrackMetadata, stripKnownExtension
+  collectTrackMetadata, stripKnownExtension, zipDirectory
 };
 
 if (require.main === module) {
