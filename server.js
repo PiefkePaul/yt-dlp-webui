@@ -675,6 +675,38 @@ function buildArgs({ url, format, quality, targetDir, cookiePath = null }) {
   return buildYtArgs({ url, format, quality, targetDir });
 }
 
+const THUMBNAIL_EXTENSIONS = new Set(['.webp', '.jpg', '.jpeg', '.png']);
+const INFO_JSON_SUFFIX = '.info.json';
+
+function stripKnownExtension(name) {
+  const ext = path.extname(name);
+  return ext ? name.slice(0, name.length - ext.length) : name;
+}
+
+function collectTrackMetadata(fileNames, targetDir) {
+  const metadataByStem = new Map();
+
+  for (const name of fileNames) {
+    if (name.toLowerCase().endsWith(INFO_JSON_SUFFIX)) {
+      const stem = name.slice(0, name.length - INFO_JSON_SUFFIX.length);
+      const entry = metadataByStem.get(stem) || {};
+      entry.infoPath = path.join(targetDir, name);
+      metadataByStem.set(stem, entry);
+      continue;
+    }
+
+    const ext = path.extname(name).toLowerCase();
+    if (THUMBNAIL_EXTENSIONS.has(ext)) {
+      const stem = stripKnownExtension(name);
+      const entry = metadataByStem.get(stem) || {};
+      entry.thumbnailPath = path.join(targetDir, name);
+      metadataByStem.set(stem, entry);
+    }
+  }
+
+  return metadataByStem;
+}
+
 function buildMp3ConvertArgs({ inputPath, outputPath, bitrate, tags, coverPath }) {
   const args = ['-y', '-i', inputPath];
 
@@ -710,12 +742,15 @@ function buildMp3ConvertArgs({ inputPath, outputPath, bitrate, tags, coverPath }
 }
 
 async function convertToMp3(inputPath, bitrate, logFn, { tags = null, coverPath = null } = {}) {
-  const outputPath = inputPath.replace(/\.[^.]+$/, '') + '.mp3';
+  const targetPath = inputPath.replace(/\.[^.]+$/, '') + '.mp3';
+  const tempOutputPath = inputPath.toLowerCase().endsWith('.mp3')
+    ? inputPath.replace(/\.mp3$/i, '.converted.mp3')
+    : targetPath;
 
   const runConvert = (withCover) => new Promise((resolve, reject) => {
     const args = buildMp3ConvertArgs({
       inputPath,
-      outputPath,
+      outputPath: tempOutputPath,
       bitrate,
       tags,
       coverPath: withCover ? coverPath : null
@@ -747,7 +782,12 @@ async function convertToMp3(inputPath, bitrate, logFn, { tags = null, coverPath 
   }
 
   await fsp.unlink(inputPath);
-  return outputPath;
+
+  if (tempOutputPath !== targetPath) {
+    await fsp.rename(tempOutputPath, targetPath);
+  }
+
+  return targetPath;
 }
 
 async function convertToMp4(inputPath, profile, logFn) {
@@ -996,8 +1036,24 @@ app.post('/api/download', async (req, res) => {
         return;
       }
 
-      let entries = (await fsp.readdir(targetDir, { withFileTypes: true }))
-        .filter((entry) => entry.isFile() && entry.name !== 'sc.cookies')
+      const dirEntries = (await fsp.readdir(targetDir, { withFileTypes: true }))
+        .filter((entry) => entry.isFile() && entry.name !== 'sc.cookies');
+
+      const metadataByStem = format === 'mp3'
+        ? collectTrackMetadata(dirEntries.map((entry) => entry.name), targetDir)
+        : new Map();
+
+      let entries = dirEntries
+        .filter((entry) => {
+          if (format !== 'mp3') {
+            return true;
+          }
+          const lower = entry.name.toLowerCase();
+          if (lower.endsWith(INFO_JSON_SUFFIX)) {
+            return false;
+          }
+          return !THUMBNAIL_EXTENSIONS.has(path.extname(entry.name).toLowerCase());
+        })
         .map((entry) => ({
           name: entry.name,
           full: path.join(targetDir, entry.name)
@@ -1015,25 +1071,52 @@ app.post('/api/download', async (req, res) => {
       if (format === 'mp3') {
         const bitrate = getAudioBitrate(quality);
         const converted = [];
+        const source = detectSource(url);
 
-        for (const entry of entries) {
-          if (entry.name.toLowerCase().endsWith('.mp3')) {
-            converted.push(entry);
-            continue;
+        try {
+          for (const entry of entries) {
+            job.conversionKind = 'mp3';
+            job.ffmpegMode = 'software';
+            job.conversionDurationSec = null;
+
+            const meta = metadataByStem.get(stripKnownExtension(entry.name)) || null;
+
+            let tags = null;
+            if (meta && meta.infoPath) {
+              try {
+                const info = JSON.parse(await fsp.readFile(meta.infoPath, 'utf8'));
+                tags = buildId3Tags(info, source);
+              } catch {
+                appendEvent(job, 'Metadaten konnten nicht gelesen werden, Datei wird ohne Tags konvertiert.');
+              }
+            }
+
+            const coverPath = meta && meta.thumbnailPath ? meta.thumbnailPath : null;
+
+            const mp3Path = await convertToMp3(
+              entry.full,
+              bitrate,
+              (text) => handleProcessOutput(job, 'ffmpeg', text),
+              { tags, coverPath }
+            );
+
+            converted.push({
+              name: path.basename(mp3Path),
+              full: mp3Path
+            });
           }
 
-          job.conversionKind = 'mp3';
-          job.ffmpegMode = 'software';
-          job.conversionDurationSec = null;
-          const mp3Path = await convertToMp3(entry.full, bitrate, (text) => handleProcessOutput(job, 'ffmpeg', text));
-
-          converted.push({
-            name: path.basename(mp3Path),
-            full: mp3Path
-          });
+          entries = converted;
+        } finally {
+          for (const meta of metadataByStem.values()) {
+            if (meta.infoPath) {
+              await fsp.unlink(meta.infoPath).catch(() => {});
+            }
+            if (meta.thumbnailPath) {
+              await fsp.unlink(meta.thumbnailPath).catch(() => {});
+            }
+          }
         }
-
-        entries = converted;
       }
 
       if (format === 'mp4') {
@@ -1320,7 +1403,8 @@ module.exports = {
   app, startServer, buildPublicClientConfig, verifyRequiredBinaries,
   detectSource, buildScArgs, buildYtArgs,
   writeTempCookieFile, fetchScSession, encryptForClient, decryptFromClient,
-  checkScTrackFormats, buildMp3ConvertArgs
+  checkScTrackFormats, buildMp3ConvertArgs,
+  collectTrackMetadata, stripKnownExtension
 };
 
 if (require.main === module) {

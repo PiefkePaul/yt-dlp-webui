@@ -16,7 +16,9 @@ const {
   buildYtArgs,
   buildScArgs,
   buildPublicClientConfig,
-  buildMp3ConvertArgs
+  buildMp3ConvertArgs,
+  collectTrackMetadata,
+  stripKnownExtension
 } = require('../server');
 
 test('encryptForClient/decryptFromClient — Roundtrip', (t) => {
@@ -299,4 +301,47 @@ test('buildMp3ConvertArgs — mit Tags und Cover', (t) => {
     '-disposition:v', 'attached_pic',
     '/tmp/out.mp3'
   ]);
+});
+
+test('stripKnownExtension — entfernt letzte Extension', (t) => {
+  assert.equal(stripKnownExtension('Song [abc].webp'), 'Song [abc]');
+  assert.equal(stripKnownExtension('Song [abc].m4a'), 'Song [abc]');
+  assert.equal(stripKnownExtension('Song [abc]'), 'Song [abc]');
+});
+
+test('collectTrackMetadata — matched info.json und Thumbnail nach Dateinamen-Stamm', (t) => {
+  const names = [
+    'Song Title [abc123].info.json',
+    'Song Title [abc123].webp',
+    'Song Title [abc123].m4a',
+    'Other Song [xyz789].info.json',
+    'Other Song [xyz789].jpg',
+    'Other Song [xyz789].opus'
+  ];
+
+  const map = collectTrackMetadata(names, '/tmp/job');
+
+  assert.equal(map.size, 2);
+  assert.deepEqual(map.get('Song Title [abc123]'), {
+    infoPath: path.join('/tmp/job', 'Song Title [abc123].info.json'),
+    thumbnailPath: path.join('/tmp/job', 'Song Title [abc123].webp')
+  });
+  assert.deepEqual(map.get('Other Song [xyz789]'), {
+    infoPath: path.join('/tmp/job', 'Other Song [xyz789].info.json'),
+    thumbnailPath: path.join('/tmp/job', 'Other Song [xyz789].jpg')
+  });
+});
+
+test('collectTrackMetadata — ignoriert Mediendateien und unbekannte Extensions', (t) => {
+  const names = ['Track.m4a', 'Track.info.json', 'Track.exe'];
+  const map = collectTrackMetadata(names, '/tmp/job');
+  assert.equal(map.size, 1);
+  assert.ok(!map.get('Track').thumbnailPath);
+});
+
+test('collectTrackMetadata — info.json ohne Thumbnail funktioniert', (t) => {
+  const names = ['Track.info.json'];
+  const map = collectTrackMetadata(names, '/tmp/job');
+  assert.equal(map.get('Track').infoPath, path.join('/tmp/job', 'Track.info.json'));
+  assert.ok(!map.get('Track').thumbnailPath);
 });
