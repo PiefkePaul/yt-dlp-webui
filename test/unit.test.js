@@ -215,10 +215,13 @@ test('buildYtArgs — write-info-json/write-thumbnail nur bei format mp3', (t) =
   const argsMp3 = buildYtArgs({ url, format: 'mp3', targetDir });
   assert.ok(argsMp3.includes('--write-info-json'));
   assert.ok(argsMp3.includes('--write-thumbnail'));
+  assert.ok(argsMp3.includes('--convert-thumbnails'));
+  assert.equal(argsMp3[argsMp3.indexOf('--convert-thumbnails') + 1], 'jpg');
 
   const argsMp4 = buildYtArgs({ url, format: 'mp4', quality: 'best', targetDir });
   assert.ok(!argsMp4.includes('--write-info-json'));
   assert.ok(!argsMp4.includes('--write-thumbnail'));
+  assert.ok(!argsMp4.includes('--convert-thumbnails'));
 });
 
 test('buildScArgs — write-info-json/write-thumbnail nur bei format mp3', (t) => {
@@ -228,10 +231,13 @@ test('buildScArgs — write-info-json/write-thumbnail nur bei format mp3', (t) =
   const argsMp3 = buildScArgs({ url, format: 'mp3', targetDir });
   assert.ok(argsMp3.includes('--write-info-json'));
   assert.ok(argsMp3.includes('--write-thumbnail'));
+  assert.ok(argsMp3.includes('--convert-thumbnails'));
+  assert.equal(argsMp3[argsMp3.indexOf('--convert-thumbnails') + 1], 'jpg');
 
   const argsMp4 = buildScArgs({ url, format: 'mp4', targetDir });
   assert.ok(!argsMp4.includes('--write-info-json'));
   assert.ok(!argsMp4.includes('--write-thumbnail'));
+  assert.ok(!argsMp4.includes('--convert-thumbnails'));
 });
 
 test('buildMp3ConvertArgs — ohne Tags und Cover', (t) => {
@@ -250,6 +256,7 @@ test('buildMp3ConvertArgs — ohne Tags und Cover', (t) => {
     '-b:a', '320k',
     '-id3v2_version', '3',
     '-write_id3v1', '1',
+    '-map_metadata', '-1',
     '/tmp/out.mp3'
   ]);
 });
@@ -270,6 +277,7 @@ test('buildMp3ConvertArgs — mit Tags, ohne Cover', (t) => {
     '-b:a', '192k',
     '-id3v2_version', '3',
     '-write_id3v1', '1',
+    '-map_metadata', '-1',
     '-metadata', 'title=A',
     '-metadata', 'artist=B',
     '/tmp/out.mp3'
@@ -294,11 +302,32 @@ test('buildMp3ConvertArgs — mit Tags und Cover', (t) => {
     '-b:a', '320k',
     '-id3v2_version', '3',
     '-write_id3v1', '1',
+    '-map_metadata', '-1',
     '-metadata', 'title=A',
     '-c:v', 'mjpeg',
     '-metadata:s:v', 'title=Album cover',
     '-metadata:s:v', 'comment=Cover (front)',
     '-disposition:v', 'attached_pic',
+    '/tmp/out.mp3'
+  ]);
+});
+
+test('buildMp3ConvertArgs — bereits mp3 nutzt Copy-Codec statt Re-Encoding', (t) => {
+  const args = buildMp3ConvertArgs({
+    inputPath: '/tmp/in.mp3',
+    outputPath: '/tmp/out.mp3',
+    bitrate: '320',
+    tags: null,
+    coverPath: null
+  });
+
+  assert.deepEqual(args, [
+    '-y', '-i', '/tmp/in.mp3',
+    '-map', '0:a:0',
+    '-c:a', 'copy',
+    '-id3v2_version', '3',
+    '-write_id3v1', '1',
+    '-map_metadata', '-1',
     '/tmp/out.mp3'
   ]);
 });

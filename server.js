@@ -649,7 +649,7 @@ function buildYtArgs({ url, format, quality, targetDir }) {
     '-o', '%(title).200B [%(id)s].%(ext)s'
   ];
 
-  const metadataArgs = format === 'mp3' ? ['--write-info-json', '--write-thumbnail'] : [];
+  const metadataArgs = format === 'mp3' ? ['--write-info-json', '--write-thumbnail', '--convert-thumbnails', 'jpg'] : [];
   const formatArgs = format === 'mp4' ? getVideoArgs(quality) : getAudioArgs();
   return [...common, ...metadataArgs, ...getCookieArgs(), ...formatArgs, url];
 }
@@ -663,7 +663,7 @@ function buildScArgs({ url, format, targetDir, cookiePath }) {
     '-o', '%(title).200B [%(id)s].%(ext)s'
   ];
 
-  const metadataArgs = format === 'mp3' ? ['--write-info-json', '--write-thumbnail'] : [];
+  const metadataArgs = format === 'mp3' ? ['--write-info-json', '--write-thumbnail', '--convert-thumbnails', 'jpg'] : [];
   const cookieArgs = cookiePath ? ['--cookies', cookiePath] : [];
   return [...common, ...metadataArgs, ...cookieArgs, '-f', 'bestaudio/best', url];
 }
@@ -719,11 +719,17 @@ function buildMp3ConvertArgs({ inputPath, outputPath, bitrate, tags, coverPath }
     args.push('-map', '1:0');
   }
 
+  const alreadyMp3 = inputPath.toLowerCase().endsWith('.mp3');
+  if (alreadyMp3) {
+    args.push('-c:a', 'copy');
+  } else {
+    args.push('-c:a', 'libmp3lame', '-b:a', `${bitrate}k`);
+  }
+
   args.push(
-    '-c:a', 'libmp3lame',
-    '-b:a', `${bitrate}k`,
     '-id3v2_version', '3',
-    '-write_id3v1', '1'
+    '-write_id3v1', '1',
+    '-map_metadata', '-1'
   );
 
   args.push(...buildFfmpegMetadataArgs(tags));
