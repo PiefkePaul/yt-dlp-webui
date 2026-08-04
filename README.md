@@ -141,3 +141,7 @@ Important:
 ## Note About MP3 Creation
 
 MP3 is no longer produced through the yt-dlp postprocessor. Instead, it is converted explicitly with FFmpeg after the download. That is more robust when yt-dlp can fetch the audio but its internal postprocessing step becomes unreliable.
+
+## ID3 Tags for Music Downloads
+
+MP3 downloads from YouTube Music and SoundCloud are automatically tagged with ID3 metadata (title, artist, album, year, genre, track number, cover art) using the metadata the platform provides via `yt-dlp`. Tags are written with `-id3v2_version 3` for broad player/iTunes compatibility. Regular YouTube videos without recognizable music metadata are left untagged, as before.
