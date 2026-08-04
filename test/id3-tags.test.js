@@ -81,6 +81,66 @@ test('buildId3Tags — playlist_title als Album-Fallback', (t) => {
   assert.equal(buildId3Tags(info, 'other').album, 'My YT Music Album');
 });
 
+test('buildId3Tags — parst Artist/Titel aus Video-Titel wenn track/artist fehlen, aber categories=Music vorhanden', (t) => {
+  const info = {
+    title: 'Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)',
+    categories: ['Music'],
+    channel: 'Rick Astley'
+  };
+
+  const tags = buildId3Tags(info, 'other');
+
+  assert.equal(tags.artist, 'Rick Astley');
+  assert.equal(tags.title, 'Never Gonna Give You Up');
+});
+
+test('buildId3Tags — Titel-Parsing entfernt Hashtag-Suffixe', (t) => {
+  const info = {
+    title: 'Teik Arô - Acid Resurrection Pt 2 (#Acid #Techno)',
+    categories: ['Music'],
+    channel: 'Teik Arô'
+  };
+
+  const tags = buildId3Tags(info, 'other');
+
+  assert.equal(tags.artist, 'Teik Arô');
+  assert.equal(tags.title, 'Acid Resurrection Pt 2');
+});
+
+test('buildId3Tags — Titel-Parsing greift NICHT ohne categories=Music (verhindert False-Positives)', (t) => {
+  const info = {
+    title: 'How to fix your bike - Beginner Tutorial',
+    categories: ['Howto & Style'],
+    channel: 'Some Channel'
+  };
+
+  assert.equal(buildId3Tags(info, 'other'), null);
+});
+
+test('buildId3Tags — categories=Music aber Titel ohne "Artist - Track"-Muster bleibt ungetaggt', (t) => {
+  const info = {
+    title: 'Some Random Video Without A Separator',
+    categories: ['Music'],
+    channel: 'Some Channel'
+  };
+
+  assert.equal(buildId3Tags(info, 'other'), null);
+});
+
+test('buildId3Tags — native track/artist haben Vorrang vor Titel-Parsing', (t) => {
+  const info = {
+    track: 'Real Track Title',
+    artist: 'Real Artist',
+    title: 'Something Else - Not The Real Data (Official Video)',
+    categories: ['Music']
+  };
+
+  const tags = buildId3Tags(info, 'other');
+
+  assert.equal(tags.artist, 'Real Artist');
+  assert.equal(tags.title, 'Real Track Title');
+});
+
 test('buildId3Tags — leere/kaputte info gibt null zurück', (t) => {
   assert.equal(buildId3Tags(null, 'soundcloud'), null);
   assert.equal(buildId3Tags(undefined, 'other'), null);
