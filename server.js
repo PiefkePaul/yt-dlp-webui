@@ -7,6 +7,7 @@ const { randomBytes, createCipheriv, createDecipheriv } = crypto;
 const { spawn } = require('child_process');
 const os = require('os');
 const archiver = require('archiver');
+const { buildId3Tags, buildFfmpegMetadataArgs } = require('./lib/id3-tags');
 
 const DEFAULT_PORT = Number(process.env.PORT || 3000);
 const DEFAULT_TMP_DIR = resolvePathValue(process.env.TMP_DIR || path.join(__dirname, 'tmp'));
@@ -648,8 +649,9 @@ function buildYtArgs({ url, format, quality, targetDir }) {
     '-o', '%(title).200B [%(id)s].%(ext)s'
   ];
 
+  const metadataArgs = format === 'mp3' ? ['--write-info-json', '--write-thumbnail', '--convert-thumbnails', 'jpg'] : [];
   const formatArgs = format === 'mp4' ? getVideoArgs(quality) : getAudioArgs();
-  return [...common, ...getCookieArgs(), ...formatArgs, url];
+  return [...common, ...metadataArgs, ...getCookieArgs(), ...formatArgs, url];
 }
 
 function buildScArgs({ url, format, targetDir, cookiePath }) {
@@ -661,8 +663,9 @@ function buildScArgs({ url, format, targetDir, cookiePath }) {
     '-o', '%(title).200B [%(id)s].%(ext)s'
   ];
 
+  const metadataArgs = format === 'mp3' ? ['--write-info-json', '--write-thumbnail', '--convert-thumbnails', 'jpg'] : [];
   const cookieArgs = cookiePath ? ['--cookies', cookiePath] : [];
-  return [...common, ...cookieArgs, '-f', 'bestaudio/best', url];
+  return [...common, ...metadataArgs, ...cookieArgs, '-f', 'bestaudio/best', url];
 }
 
 function buildArgs({ url, format, quality, targetDir, cookiePath = null }) {
@@ -672,18 +675,93 @@ function buildArgs({ url, format, quality, targetDir, cookiePath = null }) {
   return buildYtArgs({ url, format, quality, targetDir });
 }
 
-async function convertToMp3(inputPath, bitrate, logFn) {
-  const outputPath = inputPath.replace(/\.[^.]+$/, '') + '.mp3';
+const THUMBNAIL_EXTENSIONS = new Set(['.webp', '.jpg', '.jpeg', '.png']);
+const INFO_JSON_SUFFIX = '.info.json';
 
-  await new Promise((resolve, reject) => {
-    const ffmpeg = spawn('ffmpeg', [
-      '-y',
-      '-i', inputPath,
-      '-vn',
-      '-c:a', 'libmp3lame',
-      '-b:a', `${bitrate}k`,
-      outputPath
-    ]);
+function stripKnownExtension(name) {
+  const ext = path.extname(name);
+  return ext ? name.slice(0, name.length - ext.length) : name;
+}
+
+function collectTrackMetadata(fileNames, targetDir) {
+  const metadataByStem = new Map();
+
+  for (const name of fileNames) {
+    if (name.toLowerCase().endsWith(INFO_JSON_SUFFIX)) {
+      const stem = name.slice(0, name.length - INFO_JSON_SUFFIX.length);
+      const entry = metadataByStem.get(stem) || {};
+      entry.infoPath = path.join(targetDir, name);
+      metadataByStem.set(stem, entry);
+      continue;
+    }
+
+    const ext = path.extname(name).toLowerCase();
+    if (THUMBNAIL_EXTENSIONS.has(ext)) {
+      const stem = stripKnownExtension(name);
+      const entry = metadataByStem.get(stem) || {};
+      entry.thumbnailPath = path.join(targetDir, name);
+      metadataByStem.set(stem, entry);
+    }
+  }
+
+  return metadataByStem;
+}
+
+function buildMp3ConvertArgs({ inputPath, outputPath, bitrate, tags, coverPath }) {
+  const args = ['-y', '-i', inputPath];
+
+  if (coverPath) {
+    args.push('-i', coverPath);
+  }
+
+  args.push('-map', '0:a:0');
+  if (coverPath) {
+    args.push('-map', '1:0');
+  }
+
+  const alreadyMp3 = inputPath.toLowerCase().endsWith('.mp3');
+  if (alreadyMp3) {
+    args.push('-c:a', 'copy');
+  } else {
+    args.push('-c:a', 'libmp3lame', '-b:a', `${bitrate}k`);
+  }
+
+  args.push(
+    '-id3v2_version', '3',
+    '-write_id3v1', '1',
+    '-map_metadata', '-1'
+  );
+
+  args.push(...buildFfmpegMetadataArgs(tags));
+
+  if (coverPath) {
+    args.push(
+      '-c:v', 'mjpeg',
+      '-metadata:s:v', 'title=Album cover',
+      '-metadata:s:v', 'comment=Cover (front)',
+      '-disposition:v', 'attached_pic'
+    );
+  }
+
+  args.push(outputPath);
+  return args;
+}
+
+async function convertToMp3(inputPath, bitrate, logFn, { tags = null, coverPath = null } = {}) {
+  const targetPath = inputPath.replace(/\.[^.]+$/, '') + '.mp3';
+  const tempOutputPath = inputPath.toLowerCase().endsWith('.mp3')
+    ? inputPath.replace(/\.mp3$/i, '.converted.mp3')
+    : targetPath;
+
+  const runConvert = (withCover) => new Promise((resolve, reject) => {
+    const args = buildMp3ConvertArgs({
+      inputPath,
+      outputPath: tempOutputPath,
+      bitrate,
+      tags,
+      coverPath: withCover ? coverPath : null
+    });
+    const ffmpeg = spawn('ffmpeg', args);
 
     ffmpeg.stdout.on('data', (buffer) => logFn(buffer.toString()));
     ffmpeg.stderr.on('data', (buffer) => logFn(buffer.toString()));
@@ -699,8 +777,23 @@ async function convertToMp3(inputPath, bitrate, logFn) {
     ffmpeg.on('error', reject);
   });
 
+  try {
+    await runConvert(Boolean(coverPath));
+  } catch (error) {
+    if (!coverPath) {
+      throw error;
+    }
+    logFn('Cover-Einbettung fehlgeschlagen, MP3 wird ohne Cover erzeugt...\n');
+    await runConvert(false);
+  }
+
   await fsp.unlink(inputPath);
-  return outputPath;
+
+  if (tempOutputPath !== targetPath) {
+    await fsp.rename(tempOutputPath, targetPath);
+  }
+
+  return targetPath;
 }
 
 async function convertToMp4(inputPath, profile, logFn) {
@@ -949,8 +1042,24 @@ app.post('/api/download', async (req, res) => {
         return;
       }
 
-      let entries = (await fsp.readdir(targetDir, { withFileTypes: true }))
-        .filter((entry) => entry.isFile() && entry.name !== 'sc.cookies')
+      const dirEntries = (await fsp.readdir(targetDir, { withFileTypes: true }))
+        .filter((entry) => entry.isFile() && entry.name !== 'sc.cookies');
+
+      const metadataByStem = format === 'mp3'
+        ? collectTrackMetadata(dirEntries.map((entry) => entry.name), targetDir)
+        : new Map();
+
+      let entries = dirEntries
+        .filter((entry) => {
+          if (format !== 'mp3') {
+            return true;
+          }
+          const lower = entry.name.toLowerCase();
+          if (lower.endsWith(INFO_JSON_SUFFIX)) {
+            return false;
+          }
+          return !THUMBNAIL_EXTENSIONS.has(path.extname(entry.name).toLowerCase());
+        })
         .map((entry) => ({
           name: entry.name,
           full: path.join(targetDir, entry.name)
@@ -968,25 +1077,52 @@ app.post('/api/download', async (req, res) => {
       if (format === 'mp3') {
         const bitrate = getAudioBitrate(quality);
         const converted = [];
+        const source = detectSource(url);
 
-        for (const entry of entries) {
-          if (entry.name.toLowerCase().endsWith('.mp3')) {
-            converted.push(entry);
-            continue;
+        try {
+          for (const entry of entries) {
+            job.conversionKind = 'mp3';
+            job.ffmpegMode = 'software';
+            job.conversionDurationSec = null;
+
+            const meta = metadataByStem.get(stripKnownExtension(entry.name)) || null;
+
+            let tags = null;
+            if (meta && meta.infoPath) {
+              try {
+                const info = JSON.parse(await fsp.readFile(meta.infoPath, 'utf8'));
+                tags = buildId3Tags(info, source);
+              } catch {
+                appendEvent(job, 'Metadaten konnten nicht gelesen werden, Datei wird ohne Tags konvertiert.');
+              }
+            }
+
+            const coverPath = tags && meta && meta.thumbnailPath ? meta.thumbnailPath : null;
+
+            const mp3Path = await convertToMp3(
+              entry.full,
+              bitrate,
+              (text) => handleProcessOutput(job, 'ffmpeg', text),
+              { tags, coverPath }
+            );
+
+            converted.push({
+              name: path.basename(mp3Path),
+              full: mp3Path
+            });
           }
 
-          job.conversionKind = 'mp3';
-          job.ffmpegMode = 'software';
-          job.conversionDurationSec = null;
-          const mp3Path = await convertToMp3(entry.full, bitrate, (text) => handleProcessOutput(job, 'ffmpeg', text));
-
-          converted.push({
-            name: path.basename(mp3Path),
-            full: mp3Path
-          });
+          entries = converted;
+        } finally {
+          for (const meta of metadataByStem.values()) {
+            if (meta.infoPath) {
+              await fsp.unlink(meta.infoPath).catch(() => {});
+            }
+            if (meta.thumbnailPath) {
+              await fsp.unlink(meta.thumbnailPath).catch(() => {});
+            }
+          }
         }
-
-        entries = converted;
       }
 
       if (format === 'mp4') {
@@ -1273,7 +1409,8 @@ module.exports = {
   app, startServer, buildPublicClientConfig, verifyRequiredBinaries,
   detectSource, buildScArgs, buildYtArgs,
   writeTempCookieFile, fetchScSession, encryptForClient, decryptFromClient,
-  checkScTrackFormats
+  checkScTrackFormats, buildMp3ConvertArgs,
+  collectTrackMetadata, stripKnownExtension
 };
 
 if (require.main === module) {

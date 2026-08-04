@@ -15,7 +15,10 @@ const {
   detectSource,
   buildScArgs,
   buildYtArgs,
-  buildPublicClientConfig
+  buildPublicClientConfig,
+  buildMp3ConvertArgs,
+  collectTrackMetadata,
+  stripKnownExtension
 } = require('../server');
 
 test('encryptForClient/decryptFromClient — Roundtrip', (t) => {
@@ -373,4 +376,171 @@ test('buildPublicClientConfig — parsed values match env variables', (t) => {
 
     delete require.cache[serverPath];
   }
+});
+
+test('buildYtArgs — write-info-json/write-thumbnail nur bei format mp3', (t) => {
+  const url = 'https://youtube.com/watch?v=12345';
+  const targetDir = '/mock/target/dir';
+
+  const argsMp3 = buildYtArgs({ url, format: 'mp3', targetDir });
+  assert.ok(argsMp3.includes('--write-info-json'));
+  assert.ok(argsMp3.includes('--write-thumbnail'));
+  assert.ok(argsMp3.includes('--convert-thumbnails'));
+  assert.equal(argsMp3[argsMp3.indexOf('--convert-thumbnails') + 1], 'jpg');
+
+  const argsMp4 = buildYtArgs({ url, format: 'mp4', quality: 'best', targetDir });
+  assert.ok(!argsMp4.includes('--write-info-json'));
+  assert.ok(!argsMp4.includes('--write-thumbnail'));
+  assert.ok(!argsMp4.includes('--convert-thumbnails'));
+});
+
+test('buildScArgs — write-info-json/write-thumbnail nur bei format mp3', (t) => {
+  const url = 'https://soundcloud.com/artist/track';
+  const targetDir = '/mock/target/dir';
+
+  const argsMp3 = buildScArgs({ url, format: 'mp3', targetDir });
+  assert.ok(argsMp3.includes('--write-info-json'));
+  assert.ok(argsMp3.includes('--write-thumbnail'));
+  assert.ok(argsMp3.includes('--convert-thumbnails'));
+  assert.equal(argsMp3[argsMp3.indexOf('--convert-thumbnails') + 1], 'jpg');
+
+  const argsMp4 = buildScArgs({ url, format: 'mp4', targetDir });
+  assert.ok(!argsMp4.includes('--write-info-json'));
+  assert.ok(!argsMp4.includes('--write-thumbnail'));
+  assert.ok(!argsMp4.includes('--convert-thumbnails'));
+});
+
+test('buildMp3ConvertArgs — ohne Tags und Cover', (t) => {
+  const args = buildMp3ConvertArgs({
+    inputPath: '/tmp/in.m4a',
+    outputPath: '/tmp/out.mp3',
+    bitrate: '320',
+    tags: null,
+    coverPath: null
+  });
+
+  assert.deepEqual(args, [
+    '-y', '-i', '/tmp/in.m4a',
+    '-map', '0:a:0',
+    '-c:a', 'libmp3lame',
+    '-b:a', '320k',
+    '-id3v2_version', '3',
+    '-write_id3v1', '1',
+    '-map_metadata', '-1',
+    '/tmp/out.mp3'
+  ]);
+});
+
+test('buildMp3ConvertArgs — mit Tags, ohne Cover', (t) => {
+  const args = buildMp3ConvertArgs({
+    inputPath: '/tmp/in.m4a',
+    outputPath: '/tmp/out.mp3',
+    bitrate: '192',
+    tags: { title: 'A', artist: 'B' },
+    coverPath: null
+  });
+
+  assert.deepEqual(args, [
+    '-y', '-i', '/tmp/in.m4a',
+    '-map', '0:a:0',
+    '-c:a', 'libmp3lame',
+    '-b:a', '192k',
+    '-id3v2_version', '3',
+    '-write_id3v1', '1',
+    '-map_metadata', '-1',
+    '-metadata', 'title=A',
+    '-metadata', 'artist=B',
+    '/tmp/out.mp3'
+  ]);
+});
+
+test('buildMp3ConvertArgs — mit Tags und Cover', (t) => {
+  const args = buildMp3ConvertArgs({
+    inputPath: '/tmp/in.m4a',
+    outputPath: '/tmp/out.mp3',
+    bitrate: '320',
+    tags: { title: 'A' },
+    coverPath: '/tmp/cover.jpg'
+  });
+
+  assert.deepEqual(args, [
+    '-y', '-i', '/tmp/in.m4a',
+    '-i', '/tmp/cover.jpg',
+    '-map', '0:a:0',
+    '-map', '1:0',
+    '-c:a', 'libmp3lame',
+    '-b:a', '320k',
+    '-id3v2_version', '3',
+    '-write_id3v1', '1',
+    '-map_metadata', '-1',
+    '-metadata', 'title=A',
+    '-c:v', 'mjpeg',
+    '-metadata:s:v', 'title=Album cover',
+    '-metadata:s:v', 'comment=Cover (front)',
+    '-disposition:v', 'attached_pic',
+    '/tmp/out.mp3'
+  ]);
+});
+
+test('buildMp3ConvertArgs — bereits mp3 nutzt Copy-Codec statt Re-Encoding', (t) => {
+  const args = buildMp3ConvertArgs({
+    inputPath: '/tmp/in.mp3',
+    outputPath: '/tmp/out.mp3',
+    bitrate: '320',
+    tags: null,
+    coverPath: null
+  });
+
+  assert.deepEqual(args, [
+    '-y', '-i', '/tmp/in.mp3',
+    '-map', '0:a:0',
+    '-c:a', 'copy',
+    '-id3v2_version', '3',
+    '-write_id3v1', '1',
+    '-map_metadata', '-1',
+    '/tmp/out.mp3'
+  ]);
+});
+
+test('stripKnownExtension — entfernt letzte Extension', (t) => {
+  assert.equal(stripKnownExtension('Song [abc].webp'), 'Song [abc]');
+  assert.equal(stripKnownExtension('Song [abc].m4a'), 'Song [abc]');
+  assert.equal(stripKnownExtension('Song [abc]'), 'Song [abc]');
+});
+
+test('collectTrackMetadata — matched info.json und Thumbnail nach Dateinamen-Stamm', (t) => {
+  const names = [
+    'Song Title [abc123].info.json',
+    'Song Title [abc123].webp',
+    'Song Title [abc123].m4a',
+    'Other Song [xyz789].info.json',
+    'Other Song [xyz789].jpg',
+    'Other Song [xyz789].opus'
+  ];
+
+  const map = collectTrackMetadata(names, '/tmp/job');
+
+  assert.equal(map.size, 2);
+  assert.deepEqual(map.get('Song Title [abc123]'), {
+    infoPath: path.join('/tmp/job', 'Song Title [abc123].info.json'),
+    thumbnailPath: path.join('/tmp/job', 'Song Title [abc123].webp')
+  });
+  assert.deepEqual(map.get('Other Song [xyz789]'), {
+    infoPath: path.join('/tmp/job', 'Other Song [xyz789].info.json'),
+    thumbnailPath: path.join('/tmp/job', 'Other Song [xyz789].jpg')
+  });
+});
+
+test('collectTrackMetadata — ignoriert Mediendateien und unbekannte Extensions', (t) => {
+  const names = ['Track.m4a', 'Track.info.json', 'Track.exe'];
+  const map = collectTrackMetadata(names, '/tmp/job');
+  assert.equal(map.size, 1);
+  assert.ok(!map.get('Track').thumbnailPath);
+});
+
+test('collectTrackMetadata — info.json ohne Thumbnail funktioniert', (t) => {
+  const names = ['Track.info.json'];
+  const map = collectTrackMetadata(names, '/tmp/job');
+  assert.equal(map.get('Track').infoPath, path.join('/tmp/job', 'Track.info.json'));
+  assert.ok(!map.get('Track').thumbnailPath);
 });
