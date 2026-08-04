@@ -11,7 +11,11 @@ const {
   decryptFromClient,
   fetchScSession,
   writeTempCookieFile,
-  checkScTrackFormats
+  checkScTrackFormats,
+  detectSource,
+  buildScArgs,
+  buildYtArgs,
+  buildPublicClientConfig
 } = require('../server');
 
 test('encryptForClient/decryptFromClient — Roundtrip', (t) => {
@@ -198,5 +202,175 @@ test('checkScTrackFormats — progressive vorhanden → canDownload: true', asyn
     assert.deepEqual(result, { canDownload: true });
   } finally {
     global.fetch = originalFetch;
+  }
+});
+
+test('detectSource — identifies soundcloud and other sources', (t) => {
+  assert.equal(detectSource('https://soundcloud.com/user/track'), 'soundcloud');
+  assert.equal(detectSource('http://soundcloud.com/user/track'), 'soundcloud');
+  assert.equal(detectSource('https://www.soundcloud.com/user/track'), 'soundcloud');
+  assert.equal(detectSource('https://m.soundcloud.com/user/track'), 'soundcloud');
+  assert.equal(detectSource('https://on.soundcloud.com/user/track'), 'soundcloud');
+  assert.equal(detectSource('https://a.b.soundcloud.com/user/track'), 'soundcloud');
+
+  assert.equal(detectSource('https://youtube.com/watch?v=12345'), 'other');
+  assert.equal(detectSource('https://youtu.be/12345'), 'other');
+  assert.equal(detectSource('https://www.youtube.com/watch?v=12345'), 'other');
+  assert.equal(detectSource('https://google.com'), 'other');
+  assert.equal(detectSource('not-a-url'), 'other');
+  assert.equal(detectSource(''), 'other');
+  assert.equal(detectSource(null), 'other');
+  assert.equal(detectSource(undefined), 'other');
+});
+
+test('buildScArgs — builds arguments for SoundCloud correctly', (t) => {
+  const url = 'https://soundcloud.com/artist/track';
+  const targetDir = '/mock/target/dir';
+  
+  // Ohne cookiePath
+  const argsWithoutCookie = buildScArgs({ url, format: 'mp3', targetDir });
+  assert.ok(argsWithoutCookie.includes('--yes-playlist'));
+  assert.ok(argsWithoutCookie.includes('--newline'));
+  assert.ok(argsWithoutCookie.includes('--restrict-filenames'));
+  assert.ok(argsWithoutCookie.includes('-P'));
+  assert.equal(argsWithoutCookie[argsWithoutCookie.indexOf('-P') + 1], targetDir);
+  assert.ok(argsWithoutCookie.includes('-o'));
+  assert.equal(argsWithoutCookie[argsWithoutCookie.indexOf('-o') + 1], '%(title).200B [%(id)s].%(ext)s');
+  assert.ok(argsWithoutCookie.includes('-f'));
+  assert.equal(argsWithoutCookie[argsWithoutCookie.indexOf('-f') + 1], 'bestaudio/best');
+  assert.equal(argsWithoutCookie[argsWithoutCookie.length - 1], url);
+  assert.ok(!argsWithoutCookie.includes('--cookies'));
+
+  // Mit cookiePath
+  const cookiePath = '/mock/cookies.txt';
+  const argsWithCookie = buildScArgs({ url, format: 'mp4', targetDir, cookiePath });
+  assert.ok(argsWithCookie.includes('--cookies'));
+  assert.equal(argsWithCookie[argsWithCookie.indexOf('--cookies') + 1], cookiePath);
+  assert.equal(argsWithCookie[argsWithCookie.length - 1], url);
+});
+
+test('buildYtArgs — builds arguments for YouTube correctly based on formats and qualities', (t) => {
+  const url = 'https://youtube.com/watch?v=12345';
+  const targetDir = '/mock/target/dir';
+
+  // Format mp3 (Audio)
+  const argsMp3 = buildYtArgs({ url, format: 'mp3', targetDir });
+  assert.ok(argsMp3.includes('--yes-playlist'));
+  assert.ok(argsMp3.includes('--newline'));
+  assert.ok(argsMp3.includes('--restrict-filenames'));
+  assert.ok(argsMp3.includes('--js-runtimes'));
+  assert.equal(argsMp3[argsMp3.indexOf('--js-runtimes') + 1], 'deno');
+  assert.ok(argsMp3.includes('--remote-components'));
+  assert.equal(argsMp3[argsMp3.indexOf('--remote-components') + 1], 'ejs:github');
+  assert.ok(argsMp3.includes('--extractor-args'));
+  assert.equal(argsMp3[argsMp3.indexOf('--extractor-args') + 1], 'youtube:player_client=android,web');
+  assert.ok(argsMp3.includes('-P'));
+  assert.equal(argsMp3[argsMp3.indexOf('-P') + 1], targetDir);
+  assert.ok(argsMp3.includes('-f'));
+  assert.equal(argsMp3[argsMp3.indexOf('-f') + 1], 'bestaudio/best');
+  assert.equal(argsMp3[argsMp3.length - 1], url);
+
+  // Format mp4 (Video) mit Quality 'best'
+  const argsMp4Best = buildYtArgs({ url, format: 'mp4', quality: 'best', targetDir });
+  assert.ok(argsMp4Best.includes('-f'));
+  assert.equal(argsMp4Best[argsMp4Best.indexOf('-f') + 1], 'bv*+ba/b');
+
+  // Format mp4 (Video) mit Quality '1080'
+  const argsMp4_1080 = buildYtArgs({ url, format: 'mp4', quality: '1080', targetDir });
+  assert.ok(argsMp4_1080.includes('-f'));
+  assert.equal(argsMp4_1080[argsMp4_1080.indexOf('-f') + 1], 'bv*[height<=1080]+ba/b[height<=1080]/b');
+
+  // Format mp4 (Video) mit Quality '720'
+  const argsMp4_720 = buildYtArgs({ url, format: 'mp4', quality: '720', targetDir });
+  assert.ok(argsMp4_720.includes('-f'));
+  assert.equal(argsMp4_720[argsMp4_720.indexOf('-f') + 1], 'bv*[height<=720]+ba/b[height<=720]/b');
+
+  // Format mp4 (Video) mit Quality '480'
+  const argsMp4_480 = buildYtArgs({ url, format: 'mp4', quality: '480', targetDir });
+  assert.ok(argsMp4_480.includes('-f'));
+  assert.equal(argsMp4_480[argsMp4_480.indexOf('-f') + 1], 'bv*[height<=480]+ba/b[height<=480]/b');
+
+  // Format mp4 (Video) mit ungültiger Quality
+  const argsMp4_Invalid = buildYtArgs({ url, format: 'mp4', quality: 'invalid-quality', targetDir });
+  assert.ok(argsMp4_Invalid.includes('-f'));
+  assert.equal(argsMp4_Invalid[argsMp4_Invalid.indexOf('-f') + 1], 'bv*[height<=1080]+ba/b[height<=1080]/b');
+});
+
+test('buildYtArgs — cookies option enabled when cookies file exists', (t) => {
+  const originalCookies = process.env.YTDLP_COOKIES_FILE;
+  process.env.YTDLP_COOKIES_FILE = 'dummy_cookies.txt';
+
+  const serverPath = require.resolve('../server');
+  delete require.cache[serverPath];
+  const freshServer = require('../server');
+
+  const fs = require('fs');
+  const originalExistsSync = fs.existsSync;
+  fs.existsSync = (path) => {
+    if (path === 'dummy_cookies.txt' || path.endsWith('dummy_cookies.txt')) {
+      return true;
+    }
+    return originalExistsSync(path);
+  };
+
+  try {
+    const args = freshServer.buildYtArgs({
+      url: 'https://youtube.com/watch?v=123',
+      format: 'mp3',
+      targetDir: '/tmp/job'
+    });
+
+    assert.ok(args.includes('--cookies'));
+    assert.ok(args.includes('dummy_cookies.txt') || args.some(a => a.endsWith('dummy_cookies.txt')));
+  } finally {
+    fs.existsSync = originalExistsSync;
+    if (originalCookies === undefined) {
+      delete process.env.YTDLP_COOKIES_FILE;
+    } else {
+      process.env.YTDLP_COOKIES_FILE = originalCookies;
+    }
+    delete require.cache[serverPath];
+  }
+});
+
+test('buildPublicClientConfig — returns config object with fields', (t) => {
+  const config = buildPublicClientConfig();
+  assert.ok(config);
+  assert.equal(typeof config.apiBaseUrl, 'string');
+  assert.equal(typeof config.demoMode, 'boolean');
+  assert.equal(typeof config.demoMessage, 'string');
+});
+
+test('buildPublicClientConfig — parsed values match env variables', (t) => {
+  const originalApiUrl = process.env.PUBLIC_API_BASE_URL;
+  const originalDemoMode = process.env.PUBLIC_DEMO_MODE;
+  const originalDemoMessage = process.env.PUBLIC_DEMO_MESSAGE;
+
+  process.env.PUBLIC_API_BASE_URL = 'https://api.my-downloader.com/';
+  process.env.PUBLIC_DEMO_MODE = 'true';
+  process.env.PUBLIC_DEMO_MESSAGE = 'Custom Demo Message';
+
+  const serverPath = require.resolve('../server');
+  delete require.cache[serverPath];
+  const freshServer = require('../server');
+
+  try {
+    const config = freshServer.buildPublicClientConfig();
+    assert.deepEqual(config, {
+      apiBaseUrl: 'https://api.my-downloader.com',
+      demoMode: true,
+      demoMessage: 'Custom Demo Message'
+    });
+  } finally {
+    if (originalApiUrl === undefined) delete process.env.PUBLIC_API_BASE_URL;
+    else process.env.PUBLIC_API_BASE_URL = originalApiUrl;
+
+    if (originalDemoMode === undefined) delete process.env.PUBLIC_DEMO_MODE;
+    else process.env.PUBLIC_DEMO_MODE = originalDemoMode;
+
+    if (originalDemoMessage === undefined) delete process.env.PUBLIC_DEMO_MESSAGE;
+    else process.env.PUBLIC_DEMO_MESSAGE = originalDemoMessage;
+
+    delete require.cache[serverPath];
   }
 });
