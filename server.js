@@ -1091,7 +1091,7 @@ app.post('/api/download', async (req, res) => {
               }
             }
 
-            const coverPath = meta && meta.thumbnailPath ? meta.thumbnailPath : null;
+            const coverPath = tags && meta && meta.thumbnailPath ? meta.thumbnailPath : null;
 
             const mp3Path = await convertToMp3(
               entry.full,
