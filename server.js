@@ -7,6 +7,7 @@ const { randomBytes, createCipheriv, createDecipheriv } = crypto;
 const { spawn } = require('child_process');
 const os = require('os');
 const archiver = require('archiver');
+const { buildId3Tags, buildFfmpegMetadataArgs } = require('./lib/id3-tags');
 
 const DEFAULT_PORT = Number(process.env.PORT || 3000);
 const DEFAULT_TMP_DIR = resolvePathValue(process.env.TMP_DIR || path.join(__dirname, 'tmp'));
@@ -674,18 +675,52 @@ function buildArgs({ url, format, quality, targetDir, cookiePath = null }) {
   return buildYtArgs({ url, format, quality, targetDir });
 }
 
-async function convertToMp3(inputPath, bitrate, logFn) {
+function buildMp3ConvertArgs({ inputPath, outputPath, bitrate, tags, coverPath }) {
+  const args = ['-y', '-i', inputPath];
+
+  if (coverPath) {
+    args.push('-i', coverPath);
+  }
+
+  args.push('-map', '0:a:0');
+  if (coverPath) {
+    args.push('-map', '1:0');
+  }
+
+  args.push(
+    '-c:a', 'libmp3lame',
+    '-b:a', `${bitrate}k`,
+    '-id3v2_version', '3',
+    '-write_id3v1', '1'
+  );
+
+  args.push(...buildFfmpegMetadataArgs(tags));
+
+  if (coverPath) {
+    args.push(
+      '-c:v', 'mjpeg',
+      '-metadata:s:v', 'title=Album cover',
+      '-metadata:s:v', 'comment=Cover (front)',
+      '-disposition:v', 'attached_pic'
+    );
+  }
+
+  args.push(outputPath);
+  return args;
+}
+
+async function convertToMp3(inputPath, bitrate, logFn, { tags = null, coverPath = null } = {}) {
   const outputPath = inputPath.replace(/\.[^.]+$/, '') + '.mp3';
 
-  await new Promise((resolve, reject) => {
-    const ffmpeg = spawn('ffmpeg', [
-      '-y',
-      '-i', inputPath,
-      '-vn',
-      '-c:a', 'libmp3lame',
-      '-b:a', `${bitrate}k`,
-      outputPath
-    ]);
+  const runConvert = (withCover) => new Promise((resolve, reject) => {
+    const args = buildMp3ConvertArgs({
+      inputPath,
+      outputPath,
+      bitrate,
+      tags,
+      coverPath: withCover ? coverPath : null
+    });
+    const ffmpeg = spawn('ffmpeg', args);
 
     ffmpeg.stdout.on('data', (buffer) => logFn(buffer.toString()));
     ffmpeg.stderr.on('data', (buffer) => logFn(buffer.toString()));
@@ -700,6 +735,16 @@ async function convertToMp3(inputPath, bitrate, logFn) {
 
     ffmpeg.on('error', reject);
   });
+
+  try {
+    await runConvert(Boolean(coverPath));
+  } catch (error) {
+    if (!coverPath) {
+      throw error;
+    }
+    logFn('Cover-Einbettung fehlgeschlagen, MP3 wird ohne Cover erzeugt...\n');
+    await runConvert(false);
+  }
 
   await fsp.unlink(inputPath);
   return outputPath;
@@ -1275,7 +1320,7 @@ module.exports = {
   app, startServer, buildPublicClientConfig, verifyRequiredBinaries,
   detectSource, buildScArgs, buildYtArgs,
   writeTempCookieFile, fetchScSession, encryptForClient, decryptFromClient,
-  checkScTrackFormats
+  checkScTrackFormats, buildMp3ConvertArgs
 };
 
 if (require.main === module) {

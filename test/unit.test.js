@@ -12,8 +12,11 @@ const {
   fetchScSession,
   writeTempCookieFile,
   checkScTrackFormats,
+  detectSource,
   buildYtArgs,
-  buildScArgs
+  buildScArgs,
+  buildPublicClientConfig,
+  buildMp3ConvertArgs
 } = require('../server');
 
 test('encryptForClient/decryptFromClient — Roundtrip', (t) => {
@@ -227,4 +230,73 @@ test('buildScArgs — write-info-json/write-thumbnail nur bei format mp3', (t) =
   const argsMp4 = buildScArgs({ url, format: 'mp4', targetDir });
   assert.ok(!argsMp4.includes('--write-info-json'));
   assert.ok(!argsMp4.includes('--write-thumbnail'));
+});
+
+test('buildMp3ConvertArgs — ohne Tags und Cover', (t) => {
+  const args = buildMp3ConvertArgs({
+    inputPath: '/tmp/in.m4a',
+    outputPath: '/tmp/out.mp3',
+    bitrate: '320',
+    tags: null,
+    coverPath: null
+  });
+
+  assert.deepEqual(args, [
+    '-y', '-i', '/tmp/in.m4a',
+    '-map', '0:a:0',
+    '-c:a', 'libmp3lame',
+    '-b:a', '320k',
+    '-id3v2_version', '3',
+    '-write_id3v1', '1',
+    '/tmp/out.mp3'
+  ]);
+});
+
+test('buildMp3ConvertArgs — mit Tags, ohne Cover', (t) => {
+  const args = buildMp3ConvertArgs({
+    inputPath: '/tmp/in.m4a',
+    outputPath: '/tmp/out.mp3',
+    bitrate: '192',
+    tags: { title: 'A', artist: 'B' },
+    coverPath: null
+  });
+
+  assert.deepEqual(args, [
+    '-y', '-i', '/tmp/in.m4a',
+    '-map', '0:a:0',
+    '-c:a', 'libmp3lame',
+    '-b:a', '192k',
+    '-id3v2_version', '3',
+    '-write_id3v1', '1',
+    '-metadata', 'title=A',
+    '-metadata', 'artist=B',
+    '/tmp/out.mp3'
+  ]);
+});
+
+test('buildMp3ConvertArgs — mit Tags und Cover', (t) => {
+  const args = buildMp3ConvertArgs({
+    inputPath: '/tmp/in.m4a',
+    outputPath: '/tmp/out.mp3',
+    bitrate: '320',
+    tags: { title: 'A' },
+    coverPath: '/tmp/cover.jpg'
+  });
+
+  assert.deepEqual(args, [
+    '-y', '-i', '/tmp/in.m4a',
+    '-i', '/tmp/cover.jpg',
+    '-map', '0:a:0',
+    '-map', '1:0',
+    '-c:a', 'libmp3lame',
+    '-b:a', '320k',
+    '-id3v2_version', '3',
+    '-write_id3v1', '1',
+    '-metadata', 'title=A',
+    '-c:v', 'mjpeg',
+    '-metadata:s:v', 'title=Album cover',
+    '-metadata:s:v', 'comment=Cover (front)',
+    '-disposition:v', 'attached_pic',
+    '/tmp/out.mp3'
+  ]);
 });
