@@ -11,7 +11,9 @@ const {
   decryptFromClient,
   fetchScSession,
   writeTempCookieFile,
-  checkScTrackFormats
+  checkScTrackFormats,
+  buildYtArgs,
+  buildScArgs
 } = require('../server');
 
 test('encryptForClient/decryptFromClient — Roundtrip', (t) => {
@@ -199,4 +201,30 @@ test('checkScTrackFormats — progressive vorhanden → canDownload: true', asyn
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test('buildYtArgs — write-info-json/write-thumbnail nur bei format mp3', (t) => {
+  const url = 'https://youtube.com/watch?v=12345';
+  const targetDir = '/mock/target/dir';
+
+  const argsMp3 = buildYtArgs({ url, format: 'mp3', targetDir });
+  assert.ok(argsMp3.includes('--write-info-json'));
+  assert.ok(argsMp3.includes('--write-thumbnail'));
+
+  const argsMp4 = buildYtArgs({ url, format: 'mp4', quality: 'best', targetDir });
+  assert.ok(!argsMp4.includes('--write-info-json'));
+  assert.ok(!argsMp4.includes('--write-thumbnail'));
+});
+
+test('buildScArgs — write-info-json/write-thumbnail nur bei format mp3', (t) => {
+  const url = 'https://soundcloud.com/artist/track';
+  const targetDir = '/mock/target/dir';
+
+  const argsMp3 = buildScArgs({ url, format: 'mp3', targetDir });
+  assert.ok(argsMp3.includes('--write-info-json'));
+  assert.ok(argsMp3.includes('--write-thumbnail'));
+
+  const argsMp4 = buildScArgs({ url, format: 'mp4', targetDir });
+  assert.ok(!argsMp4.includes('--write-info-json'));
+  assert.ok(!argsMp4.includes('--write-thumbnail'));
 });

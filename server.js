@@ -648,8 +648,9 @@ function buildYtArgs({ url, format, quality, targetDir }) {
     '-o', '%(title).200B [%(id)s].%(ext)s'
   ];
 
+  const metadataArgs = format === 'mp3' ? ['--write-info-json', '--write-thumbnail'] : [];
   const formatArgs = format === 'mp4' ? getVideoArgs(quality) : getAudioArgs();
-  return [...common, ...getCookieArgs(), ...formatArgs, url];
+  return [...common, ...metadataArgs, ...getCookieArgs(), ...formatArgs, url];
 }
 
 function buildScArgs({ url, format, targetDir, cookiePath }) {
@@ -661,8 +662,9 @@ function buildScArgs({ url, format, targetDir, cookiePath }) {
     '-o', '%(title).200B [%(id)s].%(ext)s'
   ];
 
+  const metadataArgs = format === 'mp3' ? ['--write-info-json', '--write-thumbnail'] : [];
   const cookieArgs = cookiePath ? ['--cookies', cookiePath] : [];
-  return [...common, ...cookieArgs, '-f', 'bestaudio/best', url];
+  return [...common, ...metadataArgs, ...cookieArgs, '-f', 'bestaudio/best', url];
 }
 
 function buildArgs({ url, format, quality, targetDir, cookiePath = null }) {
