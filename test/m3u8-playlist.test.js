@@ -52,3 +52,11 @@ test('buildM3u8Content — Sonderzeichen im Titel werden unveraendert durchgerei
 test('buildM3u8Content — leeres Array ergibt nur den Header', (t) => {
   assert.equal(buildM3u8Content([]), '#EXTM3U\n');
 });
+
+test('buildM3u8Content — Zeilenumbrueche im Titel werden durch Leerzeichen ersetzt', (t) => {
+  const content = buildM3u8Content([
+    { title: 'Line One\nLine Two', artist: null, duration: 10, fileName: 'x.mp3' }
+  ]);
+
+  assert.equal(content, '#EXTM3U\n#EXTINF:10,Line One Line Two\nx.mp3\n');
+});

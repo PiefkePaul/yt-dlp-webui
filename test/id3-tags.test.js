@@ -200,16 +200,6 @@ test('buildId3Tags — leeres overrides-Objekt aendert bestehendes Verhalten nic
   assert.deepEqual(withEmptyOverrides, withoutOptions);
 });
 
-test('buildFfmpegMetadataArgs — baut -metadata Paare für gesetzte Felder in Reihenfolge', (t) => {
-  const args = buildFfmpegMetadataArgs({ title: 'A', artist: 'B' });
-  assert.deepEqual(args, ['-metadata', 'title=A', '-metadata', 'artist=B']);
-});
-
-test('buildFfmpegMetadataArgs — leere/null Tags ergeben leeres Array', (t) => {
-  assert.deepEqual(buildFfmpegMetadataArgs(null), []);
-  assert.deepEqual(buildFfmpegMetadataArgs({}), []);
-});
-
 test('buildId3Tags — whitespace-only Override-Feld faellt auf info.title zurueck, auch wenn ein anderes Override-Feld gueltig ist', (t) => {
   const info = {
     title: 'How to fix your bike',
@@ -220,4 +210,14 @@ test('buildId3Tags — whitespace-only Override-Feld faellt auf info.title zurue
 
   assert.equal(tags.title, 'How to fix your bike');
   assert.equal(tags.genre, 'Rock');
+});
+
+test('buildFfmpegMetadataArgs — baut -metadata Paare für gesetzte Felder in Reihenfolge', (t) => {
+  const args = buildFfmpegMetadataArgs({ title: 'A', artist: 'B' });
+  assert.deepEqual(args, ['-metadata', 'title=A', '-metadata', 'artist=B']);
+});
+
+test('buildFfmpegMetadataArgs — leere/null Tags ergeben leeres Array', (t) => {
+  assert.deepEqual(buildFfmpegMetadataArgs(null), []);
+  assert.deepEqual(buildFfmpegMetadataArgs({}), []);
 });

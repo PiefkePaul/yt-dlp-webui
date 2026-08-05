@@ -15,6 +15,7 @@ const bundleEntries = [
   'package.json',
   'package-lock.json',
   'server.js',
+  'lib',
   'public',
   'node_modules'
 ];

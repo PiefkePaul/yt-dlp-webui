@@ -1170,7 +1170,8 @@ app.post('/api/download', async (req, res) => {
         }
 
         if (entries.length > 1) {
-          const m3u8Name = `${safeBaseName(playlistTitle || 'playlist')}.m3u8`;
+          const safePlaylistTitle = (playlistTitle || 'playlist').slice(0, 120);
+          const m3u8Name = `${safeBaseName(safePlaylistTitle)}.m3u8`;
           const m3u8Path = path.join(targetDir, m3u8Name);
           await fsp.writeFile(m3u8Path, buildM3u8Content(playlistTracks), 'utf8');
         }
