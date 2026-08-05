@@ -56,6 +56,14 @@
   const scVerifyResult = document.getElementById('scVerifyResult');
   const scBanner = document.getElementById('scBanner');
   const scBannerTokenBtn = document.getElementById('scBannerTokenBtn');
+  const manualTaggingBox = document.getElementById('manualTaggingBox');
+  const forceMusicToggle = document.getElementById('forceMusicToggle');
+  const manualTagsPlaylistHint = document.getElementById('manualTagsPlaylistHint');
+  const manualTitle = document.getElementById('manualTitle');
+  const manualArtist = document.getElementById('manualArtist');
+  const manualAlbum = document.getElementById('manualAlbum');
+  const manualYear = document.getElementById('manualYear');
+  const manualGenre = document.getElementById('manualGenre');
 
   function createApiUrl(value) {
     return new URL(value, apiBaseUrl || window.location.origin).toString();
@@ -120,6 +128,47 @@
     const url = document.getElementById('url').value;
     const needsBanner = detectSoundCloud(url) && !hasStoredCredentials();
     scBanner.classList.toggle('hidden', !needsBanner);
+  }
+
+  function isLikelyPlaylist(url) {
+    if (typeof url !== 'string' || !url.trim()) return false;
+    try {
+      const parsed = new URL(url);
+      if (parsed.searchParams.has('list')) return true;
+      return /\/sets\/|\/playlist/i.test(parsed.pathname);
+    } catch {
+      return false;
+    }
+  }
+
+  function updateManualTaggingVisibility() {
+    manualTaggingBox.classList.toggle('hidden', formatSelect.value !== 'mp3');
+
+    const url = document.getElementById('url').value;
+    const playlist = isLikelyPlaylist(url);
+    for (const field of [manualTitle, manualArtist, manualAlbum, manualYear, manualGenre]) {
+      field.disabled = playlist;
+    }
+    manualTagsPlaylistHint.classList.toggle('hidden', !playlist);
+  }
+
+  function collectManualTags(url) {
+    if (isLikelyPlaylist(url)) return null;
+
+    const fields = {
+      title: manualTitle.value.trim(),
+      artist: manualArtist.value.trim(),
+      album: manualAlbum.value.trim(),
+      year: manualYear.value.trim(),
+      genre: manualGenre.value.trim()
+    };
+
+    const manualTags = {};
+    for (const [key, value] of Object.entries(fields)) {
+      if (value) manualTags[key] = value;
+    }
+
+    return Object.keys(manualTags).length > 0 ? manualTags : null;
   }
 
   function openSettingsModal() {
@@ -254,12 +303,17 @@
 
   fillQualityOptions('mp3');
   updateScBanner();
-  formatSelect.addEventListener('change', () => fillQualityOptions(formatSelect.value));
+  updateManualTaggingVisibility();
+  formatSelect.addEventListener('change', () => {
+    fillQualityOptions(formatSelect.value);
+    updateManualTaggingVisibility();
+  });
 
   document.getElementById('url').addEventListener('input', (e) => {
     const isSC = detectSoundCloud(e.target.value);
     updateUiForSource(isSC);
     updateScBanner();
+    updateManualTaggingVisibility();
   });
 
   settingsToggle.addEventListener('click', openSettingsModal);
@@ -360,6 +414,8 @@
       const isSC = detectSoundCloud(urlInput);
       const { encryptedToken, encryptedSession } = isSC ? loadEncryptedCredentials() : {};
 
+      const manualTags = collectManualTags(urlInput);
+
       const response = await fetch(createApiUrl('/api/download'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -367,6 +423,8 @@
           url: urlInput,
           format: formatSelect.value,
           quality: qualitySelect.value,
+          forceMusic: forceMusicToggle.checked,
+          ...(manualTags ? { manualTags } : {}),
           ...(encryptedToken ? { encryptedToken } : {}),
           ...(encryptedSession ? { encryptedSession } : {})
         })

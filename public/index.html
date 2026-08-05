@@ -302,6 +302,26 @@
       </div>
     </form>
 
+    <details id="manualTaggingBox" class="hidden">
+      <summary>Manuelles Tagging</summary>
+      <div class="stack" style="padding-top:12px">
+        <label style="display:flex;align-items:center;gap:8px;color:var(--text);font-size:0.9rem">
+          <input id="forceMusicToggle" type="checkbox" style="width:auto" />
+          Als Musik behandeln (erzwingen)
+        </label>
+        <div id="manualTagFields" class="stack">
+          <input id="manualTitle" type="text" placeholder="Titel (optional)" />
+          <input id="manualArtist" type="text" placeholder="Interpret (optional)" />
+          <input id="manualAlbum" type="text" placeholder="Album (optional)" />
+          <input id="manualYear" type="text" placeholder="Jahr (optional)" />
+          <input id="manualGenre" type="text" placeholder="Genre (optional)" />
+        </div>
+        <div id="manualTagsPlaylistHint" class="muted hidden" style="font-size:0.82rem">
+          Nur bei Einzeltiteln verfügbar.
+        </div>
+      </div>
+    </details>
+
     <div id="scBanner" class="banner sc-warning hidden">
       <span style="color:#fbbf24;font-size:0.88rem">
         ⚠ Kein SoundCloud-Token gesetzt — private oder Go+-Tracks können nicht geladen werden.
