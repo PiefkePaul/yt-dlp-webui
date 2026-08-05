@@ -209,3 +209,15 @@ test('buildFfmpegMetadataArgs — leere/null Tags ergeben leeres Array', (t) => 
   assert.deepEqual(buildFfmpegMetadataArgs(null), []);
   assert.deepEqual(buildFfmpegMetadataArgs({}), []);
 });
+
+test('buildId3Tags — whitespace-only Override-Feld faellt auf info.title zurueck, auch wenn ein anderes Override-Feld gueltig ist', (t) => {
+  const info = {
+    title: 'How to fix your bike',
+    uploader: 'Some Channel'
+  };
+
+  const tags = buildId3Tags(info, 'other', { overrides: { genre: 'Rock', title: '   ' } });
+
+  assert.equal(tags.title, 'How to fix your bike');
+  assert.equal(tags.genre, 'Rock');
+});
