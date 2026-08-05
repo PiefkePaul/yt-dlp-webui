@@ -395,6 +395,11 @@ test('buildYtArgs — write-info-json/write-thumbnail nur bei format mp3', (t) =
   assert.ok(!argsMp4.includes('--convert-thumbnails'));
 });
 
+test('buildYtArgs — enthält --ignore-errors damit einzelne fehlerhafte Playlist-Titel den Job nicht abbrechen', (t) => {
+  const args = buildYtArgs({ url: 'https://youtube.com/watch?v=12345', format: 'mp3', targetDir: '/mock/target/dir' });
+  assert.ok(args.includes('--ignore-errors'));
+});
+
 test('buildScArgs — write-info-json/write-thumbnail nur bei format mp3', (t) => {
   const url = 'https://soundcloud.com/artist/track';
   const targetDir = '/mock/target/dir';
@@ -409,6 +414,11 @@ test('buildScArgs — write-info-json/write-thumbnail nur bei format mp3', (t) =
   assert.ok(!argsMp4.includes('--write-info-json'));
   assert.ok(!argsMp4.includes('--write-thumbnail'));
   assert.ok(!argsMp4.includes('--convert-thumbnails'));
+});
+
+test('buildScArgs — enthält --ignore-errors damit einzelne fehlerhafte Playlist-Titel den Job nicht abbrechen', (t) => {
+  const args = buildScArgs({ url: 'https://soundcloud.com/artist/track', format: 'mp3', targetDir: '/mock/target/dir' });
+  assert.ok(args.includes('--ignore-errors'));
 });
 
 test('buildMp3ConvertArgs — ohne Tags und Cover', (t) => {

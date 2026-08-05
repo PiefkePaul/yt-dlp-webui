@@ -640,6 +640,7 @@ function getCookieArgs() {
 function buildYtArgs({ url, format, quality, targetDir }) {
   const common = [
     '--yes-playlist',
+    '--ignore-errors',
     '--newline',
     '--restrict-filenames',
     '--js-runtimes', 'deno',
@@ -657,6 +658,7 @@ function buildYtArgs({ url, format, quality, targetDir }) {
 function buildScArgs({ url, format, targetDir, cookiePath }) {
   const common = [
     '--yes-playlist',
+    '--ignore-errors',
     '--newline',
     '--restrict-filenames',
     '-P', targetDir,
@@ -1028,20 +1030,6 @@ app.post('/api/download', async (req, res) => {
     }
 
     try {
-      if (code !== 0) {
-        job.status = 'error';
-        job.stage = 'error';
-        const rawText = job.rawLog.join('\n');
-        if (detectSource(url) === 'soundcloud' && rawText.includes('HTTP Error 404')) {
-          job.error = 'Download fehlgeschlagen — der Track könnte DRM-geschützt sein. Bitte erneut versuchen oder einen anderen Track wählen.';
-        } else {
-          job.error = 'yt-dlp wurde mit einem Fehler beendet.';
-        }
-        appendEvent(job, 'Download fehlgeschlagen.');
-        scheduleJobCleanup(job);
-        return;
-      }
-
       const dirEntries = (await fsp.readdir(targetDir, { withFileTypes: true }))
         .filter((entry) => entry.isFile() && entry.name !== 'sc.cookies');
 
@@ -1064,6 +1052,28 @@ app.post('/api/download', async (req, res) => {
           name: entry.name,
           full: path.join(targetDir, entry.name)
         }));
+
+      // yt-dlp gibt bei Playlists einen Exit-Code != 0 zurück, sobald auch nur ein
+      // einzelner Titel fehlschlägt (z.B. gelöschtes Video) — auch wenn alle anderen
+      // Titel erfolgreich heruntergeladen wurden. Nur als Totalausfall behandeln,
+      // wenn dabei tatsächlich keine einzige Datei erzeugt wurde.
+      if (code !== 0 && entries.length === 0) {
+        job.status = 'error';
+        job.stage = 'error';
+        const rawText = job.rawLog.join('\n');
+        if (detectSource(url) === 'soundcloud' && rawText.includes('HTTP Error 404')) {
+          job.error = 'Download fehlgeschlagen — der Track könnte DRM-geschützt sein. Bitte erneut versuchen oder einen anderen Track wählen.';
+        } else {
+          job.error = 'yt-dlp wurde mit einem Fehler beendet.';
+        }
+        appendEvent(job, 'Download fehlgeschlagen.');
+        scheduleJobCleanup(job);
+        return;
+      }
+
+      if (code !== 0 && entries.length > 0) {
+        appendEvent(job, 'Einzelne Titel der Playlist konnten nicht heruntergeladen werden, Verarbeitung wird mit den verfügbaren Titeln fortgesetzt.');
+      }
 
       if (entries.length === 0) {
         job.status = 'error';
