@@ -145,3 +145,9 @@ MP3 is no longer produced through the yt-dlp postprocessor. Instead, it is conve
 ## ID3 Tags for Music Downloads
 
 MP3 downloads from YouTube Music and SoundCloud are automatically tagged with ID3 metadata (title, artist, album, year, genre, track number, cover art) using the metadata the platform provides via `yt-dlp`. Tags are written with `-id3v2_version 3` for broad player/iTunes compatibility. Regular YouTube videos without recognizable music metadata are left untagged, as before.
+
+For videos that aren't automatically recognized as music, the web UI offers a collapsible "Manuelles Tagging" section (visible when MP3 is selected): a "Als Musik behandeln (erzwingen)" checkbox forces tagging using the existing metadata/title-parsing fallbacks, and optional Title/Artist/Album/Year/Genre fields let you override individual tag values directly. The manual text fields are only available for single-video downloads (disabled automatically when the URL looks like a playlist).
+
+## Playlist Files (M3U8)
+
+MP3 playlist downloads (more than one track) automatically include an iTunes-compatible `.m3u8` playlist file in the resulting ZIP, referencing the tracks by filename in download order. It can be imported directly into iTunes/Music.app, foobar2000, or any other M3U8-compatible player after unzipping.
