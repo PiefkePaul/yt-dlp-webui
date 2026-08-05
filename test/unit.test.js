@@ -19,7 +19,8 @@ const {
   buildMp3ConvertArgs,
   collectTrackMetadata,
   stripKnownExtension,
-  zipDirectory
+  zipDirectory,
+  sanitizeManualTags
 } = require('../server');
 
 test('encryptForClient/decryptFromClient — Roundtrip', (t) => {
@@ -574,4 +575,22 @@ test('zipDirectory — schließt sc.cookies immer aus, unabhängig von excludeFi
   } finally {
     await fsp.rm(tmpDir, { recursive: true, force: true });
   }
+});
+
+test('sanitizeManualTags — trimmt Strings und verwirft leere/nicht-String-Felder', (t) => {
+  const result = sanitizeManualTags({
+    title: '  My Title  ',
+    artist: '',
+    album: 42,
+    year: '2020',
+    genre: '   '
+  });
+
+  assert.deepEqual(result, { title: 'My Title', year: '2020' });
+});
+
+test('sanitizeManualTags — null/undefined/leeres Objekt ergibt null', (t) => {
+  assert.equal(sanitizeManualTags(null), null);
+  assert.equal(sanitizeManualTags(undefined), null);
+  assert.equal(sanitizeManualTags({}), null);
 });

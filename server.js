@@ -909,8 +909,24 @@ function resolveDownloadUrl(req, job) {
   return new URL(relativePath, baseUrl).toString();
 }
 
+const MANUAL_TAG_FIELDS = ['title', 'artist', 'album', 'year', 'genre'];
+
+function sanitizeManualTags(manualTags) {
+  if (!manualTags || typeof manualTags !== 'object') {
+    return null;
+  }
+  const sanitized = {};
+  for (const field of MANUAL_TAG_FIELDS) {
+    const value = manualTags[field];
+    if (typeof value === 'string' && value.trim() !== '') {
+      sanitized[field] = value.trim();
+    }
+  }
+  return Object.keys(sanitized).length > 0 ? sanitized : null;
+}
+
 app.post('/api/download', async (req, res) => {
-  const { url, format = 'mp3', quality = 'best', encryptedToken, encryptedSession } = req.body || {};
+  const { url, format = 'mp3', quality = 'best', encryptedToken, encryptedSession, forceMusic, manualTags } = req.body || {};
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: 'Bitte einen gueltigen Link angeben.' });
@@ -941,7 +957,9 @@ app.post('/api/download', async (req, res) => {
     cleanupTimer: null,
     conversionDurationSec: null,
     conversionKind: null,
-    ffmpegMode: null
+    ffmpegMode: null,
+    forceMusic: Boolean(forceMusic),
+    manualTags: sanitizeManualTags(manualTags)
   };
 
   jobs.set(id, job);
@@ -1101,7 +1119,7 @@ app.post('/api/download', async (req, res) => {
             if (meta && meta.infoPath) {
               try {
                 const info = JSON.parse(await fsp.readFile(meta.infoPath, 'utf8'));
-                tags = buildId3Tags(info, source);
+                tags = buildId3Tags(info, source, { forceMusic: job.forceMusic, overrides: job.manualTags });
               } catch {
                 appendEvent(job, 'Metadaten konnten nicht gelesen werden, Datei wird ohne Tags konvertiert.');
               }
@@ -1420,7 +1438,8 @@ module.exports = {
   detectSource, buildScArgs, buildYtArgs,
   writeTempCookieFile, fetchScSession, encryptForClient, decryptFromClient,
   checkScTrackFormats, buildMp3ConvertArgs,
-  collectTrackMetadata, stripKnownExtension, zipDirectory
+  collectTrackMetadata, stripKnownExtension, zipDirectory,
+  sanitizeManualTags
 };
 
 if (require.main === module) {
