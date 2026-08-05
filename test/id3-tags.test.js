@@ -147,6 +147,59 @@ test('buildId3Tags — leere/kaputte info gibt null zurück', (t) => {
   assert.equal(buildId3Tags({}, 'soundcloud'), null);
 });
 
+test('buildId3Tags — forceMusic=true tagged Video ohne Music-Kategorie und ohne Titel-Muster', (t) => {
+  const info = {
+    title: 'Just A Random Video Title',
+    uploader: 'Some Channel'
+  };
+
+  const tags = buildId3Tags(info, 'other', { forceMusic: true });
+
+  assert.equal(tags.title, 'Just A Random Video Title');
+  assert.equal(tags.artist, 'Some Channel');
+});
+
+test('buildId3Tags — overrides.title/artist haben Vorrang vor nativen Werten', (t) => {
+  const info = {
+    track: 'Native Title',
+    artist: 'Native Artist',
+    title: 'Native Title'
+  };
+
+  const tags = buildId3Tags(info, 'other', { overrides: { title: 'Manual Title', artist: 'Manual Artist' } });
+
+  assert.equal(tags.title, 'Manual Title');
+  assert.equal(tags.artist, 'Manual Artist');
+});
+
+test('buildId3Tags — einzelnes overrides-Feld reicht, um sonst nicht erkanntes Video zu taggen', (t) => {
+  const info = {
+    title: 'How to fix your bike',
+    uploader: 'Some Channel'
+  };
+
+  const tags = buildId3Tags(info, 'other', { overrides: { genre: 'Rock' } });
+
+  assert.equal(tags.genre, 'Rock');
+  assert.equal(tags.title, 'How to fix your bike');
+});
+
+test('buildId3Tags — overrides mit nur Leerzeichen zaehlt nicht als gesetzt', (t) => {
+  const info = {
+    title: 'How to fix your bike',
+    uploader: 'Some Channel'
+  };
+
+  assert.equal(buildId3Tags(info, 'other', { overrides: { title: '   ' } }), null);
+});
+
+test('buildId3Tags — leeres overrides-Objekt aendert bestehendes Verhalten nicht (Regression)', (t) => {
+  const info = { track: 'X', artist: 'Y', release_year: 2019 };
+  const withoutOptions = buildId3Tags(info, 'other');
+  const withEmptyOverrides = buildId3Tags(info, 'other', { overrides: {} });
+  assert.deepEqual(withEmptyOverrides, withoutOptions);
+});
+
 test('buildFfmpegMetadataArgs — baut -metadata Paare für gesetzte Felder in Reihenfolge', (t) => {
   const args = buildFfmpegMetadataArgs({ title: 'A', artist: 'B' });
   assert.deepEqual(args, ['-metadata', 'title=A', '-metadata', 'artist=B']);
