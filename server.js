@@ -8,6 +8,7 @@ const { spawn } = require('child_process');
 const os = require('os');
 const archiver = require('archiver');
 const { buildId3Tags, buildFfmpegMetadataArgs } = require('./lib/id3-tags');
+const { buildM3u8Content } = require('./lib/m3u8-playlist');
 
 const DEFAULT_PORT = Number(process.env.PORT || 3000);
 const DEFAULT_TMP_DIR = resolvePathValue(process.env.TMP_DIR || path.join(__dirname, 'tmp'));
@@ -1106,6 +1107,8 @@ app.post('/api/download', async (req, res) => {
         const bitrate = getAudioBitrate(quality);
         const converted = [];
         const source = detectSource(url);
+        const playlistTracks = [];
+        let playlistTitle = null;
 
         try {
           for (const entry of entries) {
@@ -1116,9 +1119,10 @@ app.post('/api/download', async (req, res) => {
             const meta = metadataByStem.get(stripKnownExtension(entry.name)) || null;
 
             let tags = null;
+            let info = null;
             if (meta && meta.infoPath) {
               try {
-                const info = JSON.parse(await fsp.readFile(meta.infoPath, 'utf8'));
+                info = JSON.parse(await fsp.readFile(meta.infoPath, 'utf8'));
                 tags = buildId3Tags(info, source, { forceMusic: job.forceMusic, overrides: job.manualTags });
               } catch {
                 appendEvent(job, 'Metadaten konnten nicht gelesen werden, Datei wird ohne Tags konvertiert.');
@@ -1134,8 +1138,21 @@ app.post('/api/download', async (req, res) => {
               { tags, coverPath }
             );
 
+            const mp3Name = path.basename(mp3Path);
+
+            if (!playlistTitle && info && info.playlist_title) {
+              playlistTitle = info.playlist_title;
+            }
+
+            playlistTracks.push({
+              title: (tags && tags.title) || (info && info.title) || stripKnownExtension(entry.name),
+              artist: (tags && tags.artist) || null,
+              duration: info && typeof info.duration === 'number' ? info.duration : null,
+              fileName: mp3Name
+            });
+
             converted.push({
-              name: path.basename(mp3Path),
+              name: mp3Name,
               full: mp3Path
             });
           }
@@ -1150,6 +1167,12 @@ app.post('/api/download', async (req, res) => {
               await fsp.unlink(meta.thumbnailPath).catch(() => {});
             }
           }
+        }
+
+        if (entries.length > 1) {
+          const m3u8Name = `${safeBaseName(playlistTitle || 'playlist')}.m3u8`;
+          const m3u8Path = path.join(targetDir, m3u8Name);
+          await fsp.writeFile(m3u8Path, buildM3u8Content(playlistTracks), 'utf8');
         }
       }
 
