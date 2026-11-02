@@ -4,7 +4,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       args:
-        YTDLP_VERSION: 2026.10.21
+        YTDLP_VERSION: 2026.10.26
         DENO_VERSION: 2.9.8
     container_name: yt-dlp-webui
     ports:
