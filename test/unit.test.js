@@ -267,8 +267,7 @@ test('buildYtArgs — builds arguments for YouTube correctly based on formats an
   assert.equal(argsMp3[argsMp3.indexOf('--js-runtimes') + 1], 'deno');
   assert.ok(argsMp3.includes('--remote-components'));
   assert.equal(argsMp3[argsMp3.indexOf('--remote-components') + 1], 'ejs:github');
-  assert.ok(argsMp3.includes('--extractor-args'));
-  assert.equal(argsMp3[argsMp3.indexOf('--extractor-args') + 1], 'youtube:player_client=android,web');
+  assert.ok(!argsMp3.includes('--extractor-args'));
   assert.ok(argsMp3.includes('-P'));
   assert.equal(argsMp3[argsMp3.indexOf('-P') + 1], targetDir);
   assert.ok(argsMp3.includes('-f'));

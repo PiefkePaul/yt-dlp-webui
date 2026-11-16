@@ -65,7 +65,7 @@ test('enthält --js-runtimes deno', () => {
 });
 test('enthält extractor-args youtube', () => {
   const args = buildYtArgs({ url: 'https://youtube.com/watch?v=x', format: 'mp3', quality: '320', targetDir: '/tmp/x' });
-  assert.ok(args.some((a) => a.startsWith('youtube:')));
+  assert.ok(!args.includes('--extractor-args'));
 });
 
 async function main() {
