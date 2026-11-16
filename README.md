@@ -2,7 +2,7 @@
 
 A self-hostable download server for `yt-dlp` with a web interface, live progress updates, MP3/MP4 output, and temporary download links for single videos and playlists.
 
-This repository is intentionally the actual server application. Docker is only an optional packaging layer for the same app, and GitHub Pages is only used as a static frontend preview.
+This repository is intentionally the actual server application. Docker is only an optional packaging layer for the same app, and the static frontend preview is built separately.
 
 ## Features
 
@@ -35,9 +35,9 @@ The app will then be available at `http://localhost:3000`.
 
 On startup, the server automatically checks whether `yt-dlp`, `ffmpeg`, and `deno` are available in your `PATH`. If something is missing, it exits with a clear error message.
 
-### Ready-to-Use Server Package from GitHub Releases
+### Ready-to-Use Server Package from Gitea Releases
 
-Tagged versions also publish a ZIP package in GitHub Releases. This package contains the runnable server app including its Node dependencies. You only need to extract it, create a `.env` file, and start the server.
+Tagged versions also publish a ZIP package in Gitea Releases. This package contains the runnable server app including its Node dependencies. You only need to extract it, create a `.env` file, and start the server.
 
 Still required on the target system:
 
@@ -98,29 +98,22 @@ Notes:
 - behavior is meant to stay as close as possible to direct hosting
 - for real Intel QSV encoding on Linux, you usually need to pass GPU access or `/dev/dri` into the container
 
-## GitHub Pages Demo
+## Static Demo and Distribution
 
-The frontend is prepared so it can later be hosted separately from the backend:
+The frontend can use a separate backend via `PUBLIC_API_BASE_URL` and `CORS_ALLOWED_ORIGINS`.
+Run `npm run pages:build` to create `dist-pages/`, or manually run **Build Demo Archive** in Gitea Actions and download its `static-demo` artifact. Extract the archive into a static web server's document root. It is a preview only; downloads require the running Node server. Publishing to a host is manual.
 
-- API requests can target another domain through `PUBLIC_API_BASE_URL`
-- the server can explicitly allow external frontends through `CORS_ALLOWED_ORIGINS`
-- download links are built in a domain-safe way
-- GitHub Pages currently shows only a static preview without active download functionality
+- Repository and releases: https://git.scholz-cloud.de/Scholz/yt-dlp-webui
+- Container: `git.scholz-cloud.de/piefkepaul/yt-dlp-webui:<tag>` (authentication required), with a Docker Hub copy.
+- Tag pushes (`v*`) publish containers and Gitea release ZIPs. Manual release runs must select an existing version tag.
+- Branch pushes and PRs run verification only. Merging never deploys the NAS service.
+- Manual container runs publish the selected ref as the image tag; deploy an explicit version rather than a moving `latest` tag.
+- The previous GitHub runtime updater has been removed. Update `YTDLP_VERSION` and `DENO_VERSION` in both `docker/Dockerfile` and `docker/docker-compose.yml` through a Gitea PR after checking upstream releases.
+- GitHub is only a backup mirror; its Actions and Pages are no longer used.
 
-Live demo:
+## Video Quality
 
-- [GitHub Pages demo](https://piefkepaul.github.io/yt-dlp-webui/)
-
-Important:
-
-- GitHub Pages is not enough for the real backend
-- production use still needs a host with process execution and writable temporary storage
-
-## Distribution
-
-- GitHub remains the source of truth for the server code
-- Docker Hub contains the ready-to-use container image
-- tagged versions additionally publish a ready-to-run server ZIP in GitHub Releases
+MP4 downloads use yt-dlp's default YouTube client selection. A requested resolution is an upper limit; the source must offer that resolution. Separate video/audio streams are downloaded and converted with FFmpeg. No legacy YouTube client is forced.
 
 ## NPM Scripts
 

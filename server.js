@@ -646,7 +646,6 @@ function buildYtArgs({ url, format, quality, targetDir }) {
     '--restrict-filenames',
     '--js-runtimes', 'deno',
     '--remote-components', 'ejs:github',
-    '--extractor-args', 'youtube:player_client=android,web',
     '-P', targetDir,
     '-o', '%(title).200B [%(id)s].%(ext)s'
   ];
