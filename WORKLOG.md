@@ -13,3 +13,7 @@
 - #1: Client-Zwang entfernt, Regressionstest für best/1080/720 ergänzt.
 - #3: Gitea-Registry + Docker Hub nur Tag/manuell; Gitea-Release-API mit Tests; Demo als manuelles Artefakt; alten Runtime-Zeitplan entfernt.
 - npm run verify erfolgreich; Release-Bundle/-Tests laufen. Keine Veröffentlichung/Deployment ausgelöst.
+
+## Checkpoint — Gitea-Hauptbranch integriert
+- Gitea main b4f9608 enthält zusätzliche SoundCloud-/Metadatenfunktionen und Unit-Tests gegenüber lokalem Altstand; vollständig übernommen. Konflikte in server.js, package.json und Smoke-Test gelöst; Qualitätsfix in buildYtArgs portiert.
+- PR #4 erstellt; erster CI-Lauf prüfte noch den Altstand. Neuprüfung erfolgt nach Merge des Hauptbranches.

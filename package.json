@@ -5,11 +5,12 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check public/app.js && node --check scripts/build-pages.js && node --check scripts/build-release.js && node --check scripts/smoke-test.js && node --check scripts/publish-gitea-release.js && node --check scripts/test-gitea-release.js",
+    "test": "node --test",
+    "check": "node --check server.js && node --check lib/id3-tags.js && node --check lib/m3u8-playlist.js && node --check public/app.js && node --check scripts/build-pages.js && node --check scripts/build-release.js && node --check scripts/smoke-test.js && node --check scripts/publish-gitea-release.js && node --check scripts/test-gitea-release.js",
     "smoke": "node scripts/smoke-test.js",
     "pages:build": "node scripts/build-pages.js",
     "release:build": "node scripts/build-release.js",
-    "verify": "npm run check && npm run smoke && npm run pages:build",
+    "verify": "npm run check && npm test && npm run smoke && npm run pages:build",
     "release:test": "npm run release:build && node scripts/test-gitea-release.js"
   },
   "dependencies": {

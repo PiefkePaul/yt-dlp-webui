@@ -8,4 +8,19 @@ cookies/*.cookies
 cookies/*.cookie
 .env
 .env.local
+docker/.env
 npm-debug.log*
+
+.superpowers/
+
+# AI tooling & internal dev files — never commit
+.serena/
+.cocoindex_code/
+.cocoindex/
+.agents/
+docs/superpowers/
+CLAUDE.md
+CODEX.md
+PFLICHTENHEFT.md
+WORKLOG.md
+session_state.md

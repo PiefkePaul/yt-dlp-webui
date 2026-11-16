@@ -3,8 +3,12 @@ const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
 const crypto = require('crypto');
+const { randomBytes, createCipheriv, createDecipheriv } = crypto;
 const { spawn } = require('child_process');
+const os = require('os');
 const archiver = require('archiver');
+const { buildId3Tags, buildFfmpegMetadataArgs } = require('./lib/id3-tags');
+const { buildM3u8Content } = require('./lib/m3u8-playlist');
 
 const DEFAULT_PORT = Number(process.env.PORT || 3000);
 const DEFAULT_TMP_DIR = resolvePathValue(process.env.TMP_DIR || path.join(__dirname, 'tmp'));
@@ -17,6 +21,13 @@ const PUBLIC_API_BASE_URL = normalizeBaseUrl(process.env.PUBLIC_API_BASE_URL || 
 const PUBLIC_DEMO_MODE = normalizeBoolean(process.env.PUBLIC_DEMO_MODE, false);
 const PUBLIC_DEMO_MESSAGE = (process.env.PUBLIC_DEMO_MESSAGE || '').trim()
   || 'Diese Seite ist aktuell nur eine statische Vorschau ohne angebundenes Backend.';
+// Go+-geschützter Track für Token-Verifikation. Muss ein Track sein,
+// der ohne Abo als 30s-Preview ausgeliefert wird.
+// Alternativ: SC_TEST_TRACK_URL in .env setzen.
+// Verifiziert am 2026-06-03: Gibt ohne Token duration=30s zurück (Preview-geschützt).
+const SC_TEST_TRACK_URL = process.env.SC_TEST_TRACK_URL || 'https://soundcloud.com/vinivicimusic/karma-extended-mix';
+const SC_CLIENT_ID = process.env.SC_CLIENT_ID || 'i53MAi5VcJrq7u38ZL1SOZtDi17ds1A0';
+const SESSION_ENCRYPTION_KEY_HEX = (process.env.SESSION_ENCRYPTION_KEY || '').trim();
 const CORS_ALLOWED_ORIGINS = parseAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS);
 const SKIP_RUNTIME_CHECKS = normalizeBoolean(process.env.SKIP_RUNTIME_CHECKS, false);
 const SKIP_FFMPEG_PROBE = normalizeBoolean(process.env.SKIP_FFMPEG_PROBE, false);
@@ -82,6 +93,118 @@ function normalizeHwAccelPreference(value) {
 function resolvePathValue(value) {
   if (!value) return '';
   return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
+}
+
+function getEncryptionKeyBuffer() {
+  if (!SESSION_ENCRYPTION_KEY_HEX || SESSION_ENCRYPTION_KEY_HEX.length !== 64) {
+    throw new Error(
+      'SESSION_ENCRYPTION_KEY fehlt oder ungültig in .env\n' +
+      'Key generieren: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+    );
+  }
+  return Buffer.from(SESSION_ENCRYPTION_KEY_HEX, 'hex');
+}
+
+function encryptForClient(plaintext) {
+  const key = getEncryptionKeyBuffer();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${iv.toString('base64')}:${tag.toString('base64')}:${encrypted.toString('base64')}`;
+}
+
+function decryptFromClient(encrypted) {
+  try {
+    if (!encrypted || typeof encrypted !== 'string') return null;
+    const parts = encrypted.split(':');
+    if (parts.length !== 3) return null;
+    const [ivB64, tagB64, cipherB64] = parts;
+    const key = getEncryptionKeyBuffer();
+    const iv = Buffer.from(ivB64, 'base64');
+    const tag = Buffer.from(tagB64, 'base64');
+    const ciphertext = Buffer.from(cipherB64, 'base64');
+    const decipher = createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
+async function fetchScSession(oauthToken) {
+  try {
+    const url = `https://api-auth.soundcloud.com/connect/session?client_id=${SC_CLIENT_ID}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: { access_token: oauthToken } })
+    });
+    if (!response.ok) return null;
+    const cookies = response.headers.getSetCookie();
+    const entry = cookies.find((c) => c.startsWith('_soundcloud_session='));
+    if (!entry) return null;
+    const raw = entry.split(';')[0].replace('_soundcloud_session=', '');
+    return raw.startsWith('"') ? raw.slice(1, -1) : raw;
+  } catch {
+    return null;
+  }
+}
+
+async function checkScTrackFormats(trackUrl, oauthToken) {
+  try {
+    const resolveUrl = `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(trackUrl)}&client_id=${SC_CLIENT_ID}`;
+    const response = await fetch(resolveUrl, {
+      headers: { 'Authorization': `OAuth ${oauthToken}` }
+    });
+    if (!response.ok) return { canDownload: true };
+    const track = await response.json();
+    const transcodings = track?.media?.transcodings;
+    if (!Array.isArray(transcodings) || transcodings.length === 0) return { canDownload: true };
+    const hasUnencrypted = transcodings.some(
+      (t) => t?.format?.protocol === 'hls' || t?.format?.protocol === 'progressive'
+    );
+    if (hasUnencrypted) return { canDownload: true };
+    return { canDownload: false, reason: 'drm' };
+  } catch {
+    return { canDownload: true };
+  }
+}
+
+function detectSource(url) {
+  try {
+    const hostname = new URL(url).hostname;
+    const isSc = hostname === 'soundcloud.com' || hostname.endsWith('.soundcloud.com');
+    return isSc ? 'soundcloud' : 'other';
+  } catch {
+    return 'other';
+  }
+}
+
+async function writeTempCookieFile(dirPath, token, sessionCookie = null) {
+  const cookiePath = path.join(dirPath, 'sc.cookies');
+  const expire = Math.floor(Date.now() / 1000) + 604800;
+  const lines = [
+    '# Netscape HTTP Cookie File',
+    `.soundcloud.com\tTRUE\t/\tTRUE\t2147483647\toauth_token\t${token}`
+  ];
+  if (sessionCookie) {
+    lines.push(`.soundcloud.com\tTRUE\t/\tTRUE\t${expire}\t_soundcloud_session\t${sessionCookie}`);
+  }
+  await fsp.writeFile(cookiePath, lines.join('\n'), { encoding: 'utf8', mode: 0o600 });
+  return cookiePath;
+}
+
+async function checkScPreview(url) {
+  try {
+    const result = await runProcessCapture('yt-dlp', [
+      '--dump-json', '--no-playlist', '--no-warnings', url
+    ]);
+    const info = JSON.parse(result.stdout.trim());
+    return typeof info.duration === 'number' && info.duration <= 35;
+  } catch {
+    return false;
+  }
 }
 
 function parseAllowedOrigins(value) {
@@ -515,9 +638,10 @@ function getCookieArgs() {
   return [];
 }
 
-function buildArgs({ url, format, quality, targetDir }) {
+function buildYtArgs({ url, format, quality, targetDir }) {
   const common = [
     '--yes-playlist',
+    '--ignore-errors',
     '--newline',
     '--restrict-filenames',
     '--js-runtimes', 'deno',
@@ -526,22 +650,120 @@ function buildArgs({ url, format, quality, targetDir }) {
     '-o', '%(title).200B [%(id)s].%(ext)s'
   ];
 
-  const formatArgs = format === 'mp4' ? getVideoArgs(quality) : getAudioArgs(quality);
-  return [...common, ...getCookieArgs(), ...formatArgs, url];
+  const metadataArgs = format === 'mp3' ? ['--write-info-json', '--write-thumbnail', '--convert-thumbnails', 'jpg'] : [];
+  const formatArgs = format === 'mp4' ? getVideoArgs(quality) : getAudioArgs();
+  return [...common, ...metadataArgs, ...getCookieArgs(), ...formatArgs, url];
 }
 
-async function convertToMp3(inputPath, bitrate, logFn) {
-  const outputPath = inputPath.replace(/\.[^.]+$/, '') + '.mp3';
+function buildScArgs({ url, format, targetDir, cookiePath }) {
+  const common = [
+    '--yes-playlist',
+    '--ignore-errors',
+    '--newline',
+    '--restrict-filenames',
+    '-P', targetDir,
+    '-o', '%(title).200B [%(id)s].%(ext)s'
+  ];
 
-  await new Promise((resolve, reject) => {
-    const ffmpeg = spawn('ffmpeg', [
-      '-y',
-      '-i', inputPath,
-      '-vn',
-      '-c:a', 'libmp3lame',
-      '-b:a', `${bitrate}k`,
-      outputPath
-    ]);
+  const metadataArgs = format === 'mp3' ? ['--write-info-json', '--write-thumbnail', '--convert-thumbnails', 'jpg'] : [];
+  const cookieArgs = cookiePath ? ['--cookies', cookiePath] : [];
+  return [...common, ...metadataArgs, ...cookieArgs, '-f', 'bestaudio/best', url];
+}
+
+function buildArgs({ url, format, quality, targetDir, cookiePath = null }) {
+  if (detectSource(url) === 'soundcloud') {
+    return buildScArgs({ url, format, targetDir, cookiePath });
+  }
+  return buildYtArgs({ url, format, quality, targetDir });
+}
+
+const THUMBNAIL_EXTENSIONS = new Set(['.webp', '.jpg', '.jpeg', '.png']);
+const INFO_JSON_SUFFIX = '.info.json';
+
+function stripKnownExtension(name) {
+  const ext = path.extname(name);
+  return ext ? name.slice(0, name.length - ext.length) : name;
+}
+
+function collectTrackMetadata(fileNames, targetDir) {
+  const metadataByStem = new Map();
+
+  for (const name of fileNames) {
+    if (name.toLowerCase().endsWith(INFO_JSON_SUFFIX)) {
+      const stem = name.slice(0, name.length - INFO_JSON_SUFFIX.length);
+      const entry = metadataByStem.get(stem) || {};
+      entry.infoPath = path.join(targetDir, name);
+      metadataByStem.set(stem, entry);
+      continue;
+    }
+
+    const ext = path.extname(name).toLowerCase();
+    if (THUMBNAIL_EXTENSIONS.has(ext)) {
+      const stem = stripKnownExtension(name);
+      const entry = metadataByStem.get(stem) || {};
+      entry.thumbnailPath = path.join(targetDir, name);
+      metadataByStem.set(stem, entry);
+    }
+  }
+
+  return metadataByStem;
+}
+
+function buildMp3ConvertArgs({ inputPath, outputPath, bitrate, tags, coverPath }) {
+  const args = ['-y', '-i', inputPath];
+
+  if (coverPath) {
+    args.push('-i', coverPath);
+  }
+
+  args.push('-map', '0:a:0');
+  if (coverPath) {
+    args.push('-map', '1:0');
+  }
+
+  const alreadyMp3 = inputPath.toLowerCase().endsWith('.mp3');
+  if (alreadyMp3) {
+    args.push('-c:a', 'copy');
+  } else {
+    args.push('-c:a', 'libmp3lame', '-b:a', `${bitrate}k`);
+  }
+
+  args.push(
+    '-id3v2_version', '3',
+    '-write_id3v1', '1',
+    '-map_metadata', '-1'
+  );
+
+  args.push(...buildFfmpegMetadataArgs(tags));
+
+  if (coverPath) {
+    args.push(
+      '-c:v', 'mjpeg',
+      '-metadata:s:v', 'title=Album cover',
+      '-metadata:s:v', 'comment=Cover (front)',
+      '-disposition:v', 'attached_pic'
+    );
+  }
+
+  args.push(outputPath);
+  return args;
+}
+
+async function convertToMp3(inputPath, bitrate, logFn, { tags = null, coverPath = null } = {}) {
+  const targetPath = inputPath.replace(/\.[^.]+$/, '') + '.mp3';
+  const tempOutputPath = inputPath.toLowerCase().endsWith('.mp3')
+    ? inputPath.replace(/\.mp3$/i, '.converted.mp3')
+    : targetPath;
+
+  const runConvert = (withCover) => new Promise((resolve, reject) => {
+    const args = buildMp3ConvertArgs({
+      inputPath,
+      outputPath: tempOutputPath,
+      bitrate,
+      tags,
+      coverPath: withCover ? coverPath : null
+    });
+    const ffmpeg = spawn('ffmpeg', args);
 
     ffmpeg.stdout.on('data', (buffer) => logFn(buffer.toString()));
     ffmpeg.stderr.on('data', (buffer) => logFn(buffer.toString()));
@@ -557,8 +779,23 @@ async function convertToMp3(inputPath, bitrate, logFn) {
     ffmpeg.on('error', reject);
   });
 
+  try {
+    await runConvert(Boolean(coverPath));
+  } catch (error) {
+    if (!coverPath) {
+      throw error;
+    }
+    logFn('Cover-Einbettung fehlgeschlagen, MP3 wird ohne Cover erzeugt...\n');
+    await runConvert(false);
+  }
+
   await fsp.unlink(inputPath);
-  return outputPath;
+
+  if (tempOutputPath !== targetPath) {
+    await fsp.rename(tempOutputPath, targetPath);
+  }
+
+  return targetPath;
 }
 
 async function convertToMp4(inputPath, profile, logFn) {
@@ -617,7 +854,7 @@ async function zipDirectory(sourceDir, outPath, excludeFileName = null) {
     archive.glob('**/*', {
       cwd: sourceDir,
       nodir: true,
-      ignore: excludeFileName ? [excludeFileName] : []
+      ignore: excludeFileName ? [excludeFileName, 'sc.cookies'] : ['sc.cookies']
     });
 
     archive.finalize();
@@ -672,8 +909,24 @@ function resolveDownloadUrl(req, job) {
   return new URL(relativePath, baseUrl).toString();
 }
 
+const MANUAL_TAG_FIELDS = ['title', 'artist', 'album', 'year', 'genre'];
+
+function sanitizeManualTags(manualTags) {
+  if (!manualTags || typeof manualTags !== 'object') {
+    return null;
+  }
+  const sanitized = {};
+  for (const field of MANUAL_TAG_FIELDS) {
+    const value = manualTags[field];
+    if (typeof value === 'string' && value.trim() !== '') {
+      sanitized[field] = value.trim();
+    }
+  }
+  return Object.keys(sanitized).length > 0 ? sanitized : null;
+}
+
 app.post('/api/download', async (req, res) => {
-  const { url, format = 'mp3', quality = 'best' } = req.body || {};
+  const { url, format = 'mp3', quality = 'best', encryptedToken, encryptedSession, forceMusic, manualTags } = req.body || {};
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: 'Bitte einen gueltigen Link angeben.' });
@@ -688,7 +941,7 @@ app.post('/api/download', async (req, res) => {
     url,
     format,
     quality,
-    requiresConversion: ['mp3', 'mp4'].includes(format),
+    requiresConversion: format === 'mp3' || (format === 'mp4' && detectSource(url) !== 'soundcloud'),
     status: 'running',
     stage: 'queued',
     progress: 0,
@@ -704,14 +957,77 @@ app.post('/api/download', async (req, res) => {
     cleanupTimer: null,
     conversionDurationSec: null,
     conversionKind: null,
-    ffmpegMode: null
+    ffmpegMode: null,
+    forceMusic: Boolean(forceMusic),
+    manualTags: sanitizeManualTags(manualTags)
   };
 
   jobs.set(id, job);
   appendEvent(job, 'Job gestartet.');
   updateProgress(job, 1, 'queued');
 
-  const args = buildArgs({ url, format, quality, targetDir });
+  let cookiePath = null;
+  let freshEncryptedSession = null;
+
+  if (detectSource(url) === 'soundcloud') {
+    if (encryptedToken && typeof encryptedToken === 'string') {
+      const oauthToken = decryptFromClient(encryptedToken);
+      if (!oauthToken) {
+        job.status = 'error';
+        job.stage = 'error';
+        updateProgress(job, 0, 'error');
+        job.error = 'Token ungültig oder abgelaufen — bitte neu verifizieren.';
+        appendEvent(job, 'Token-Fehler.');
+        scheduleJobCleanup(job);
+        return res.json({ id });
+      }
+      const drmCheck = await checkScTrackFormats(url, oauthToken);
+      if (!drmCheck.canDownload) {
+        job.status = 'error';
+        job.stage = 'error';
+        updateProgress(job, 0, 'error');
+        job.error = 'Dieser Track ist DRM-geschützt und kann derzeit nicht heruntergeladen werden. Go+-Support ist in Vorbereitung.';
+        appendEvent(job, 'DRM-geschützter Track erkannt.');
+        scheduleJobCleanup(job);
+        return res.json({ id });
+      }
+      let sessionCookie = decryptFromClient(encryptedSession) || null;
+      if (!sessionCookie) {
+        appendEvent(job, 'SC-Session wird geholt...');
+        sessionCookie = await fetchScSession(oauthToken);
+        if (!sessionCookie) {
+          appendEvent(job, 'Session-Cookie nicht verfügbar, Download wird trotzdem versucht...');
+        } else {
+          freshEncryptedSession = encryptForClient(sessionCookie);
+        }
+      }
+      try {
+        cookiePath = await writeTempCookieFile(targetDir, oauthToken, sessionCookie);
+      } catch {
+        job.status = 'error';
+        job.stage = 'error';
+        updateProgress(job, 0, 'error');
+        job.error = 'Cookie-Datei konnte nicht erstellt werden.';
+        appendEvent(job, 'Interner Fehler beim Token-Handling.');
+        scheduleJobCleanup(job);
+        return res.json({ id });
+      }
+    } else {
+      appendEvent(job, 'Prüfe ob Track öffentlich zugänglich...');
+      const isPreview = await checkScPreview(url);
+      if (isPreview) {
+        job.status = 'error';
+        job.stage = 'error';
+        updateProgress(job, 0, 'error');
+        job.error = 'Dieser Track benötigt einen SoundCloud-Token — ohne Token wird nur eine 30s-Vorschau ausgeliefert.';
+        appendEvent(job, 'Token benötigt.');
+        scheduleJobCleanup(job);
+        return res.json({ id });
+      }
+    }
+  }
+
+  const args = buildArgs({ url, format, quality, targetDir, cookiePath });
   const child = spawn('yt-dlp', args);
 
   child.stdout.on('data', (buffer) => handleProcessOutput(job, 'ytdlp', buffer.toString()));
@@ -726,22 +1042,56 @@ app.post('/api/download', async (req, res) => {
   });
 
   child.on('close', async (code) => {
+    // Cookie-Datei sofort löschen — als erstes, vor jeder weiteren Verarbeitung
+    if (cookiePath) {
+      await fsp.rm(cookiePath, { force: true }).catch(() => {});
+    }
+
     try {
-      if (code !== 0) {
+      const dirEntries = (await fsp.readdir(targetDir, { withFileTypes: true }))
+        .filter((entry) => entry.isFile() && entry.name !== 'sc.cookies');
+
+      const metadataByStem = format === 'mp3'
+        ? collectTrackMetadata(dirEntries.map((entry) => entry.name), targetDir)
+        : new Map();
+
+      let entries = dirEntries
+        .filter((entry) => {
+          if (format !== 'mp3') {
+            return true;
+          }
+          const lower = entry.name.toLowerCase();
+          if (lower.endsWith(INFO_JSON_SUFFIX)) {
+            return false;
+          }
+          return !THUMBNAIL_EXTENSIONS.has(path.extname(entry.name).toLowerCase());
+        })
+        .map((entry) => ({
+          name: entry.name,
+          full: path.join(targetDir, entry.name)
+        }));
+
+      // yt-dlp gibt bei Playlists einen Exit-Code != 0 zurück, sobald auch nur ein
+      // einzelner Titel fehlschlägt (z.B. gelöschtes Video) — auch wenn alle anderen
+      // Titel erfolgreich heruntergeladen wurden. Nur als Totalausfall behandeln,
+      // wenn dabei tatsächlich keine einzige Datei erzeugt wurde.
+      if (code !== 0 && entries.length === 0) {
         job.status = 'error';
         job.stage = 'error';
-        job.error = 'yt-dlp wurde mit einem Fehler beendet.';
+        const rawText = job.rawLog.join('\n');
+        if (detectSource(url) === 'soundcloud' && rawText.includes('HTTP Error 404')) {
+          job.error = 'Download fehlgeschlagen — der Track könnte DRM-geschützt sein. Bitte erneut versuchen oder einen anderen Track wählen.';
+        } else {
+          job.error = 'yt-dlp wurde mit einem Fehler beendet.';
+        }
         appendEvent(job, 'Download fehlgeschlagen.');
         scheduleJobCleanup(job);
         return;
       }
 
-      let entries = (await fsp.readdir(targetDir, { withFileTypes: true }))
-        .filter((entry) => entry.isFile())
-        .map((entry) => ({
-          name: entry.name,
-          full: path.join(targetDir, entry.name)
-        }));
+      if (code !== 0 && entries.length > 0) {
+        appendEvent(job, 'Einzelne Titel der Playlist konnten nicht heruntergeladen werden, Verarbeitung wird mit den verfügbaren Titeln fortgesetzt.');
+      }
 
       if (entries.length === 0) {
         job.status = 'error';
@@ -755,25 +1105,75 @@ app.post('/api/download', async (req, res) => {
       if (format === 'mp3') {
         const bitrate = getAudioBitrate(quality);
         const converted = [];
+        const source = detectSource(url);
+        const playlistTracks = [];
+        let playlistTitle = null;
 
-        for (const entry of entries) {
-          if (entry.name.toLowerCase().endsWith('.mp3')) {
-            converted.push(entry);
-            continue;
+        try {
+          for (const entry of entries) {
+            job.conversionKind = 'mp3';
+            job.ffmpegMode = 'software';
+            job.conversionDurationSec = null;
+
+            const meta = metadataByStem.get(stripKnownExtension(entry.name)) || null;
+
+            let tags = null;
+            let info = null;
+            if (meta && meta.infoPath) {
+              try {
+                info = JSON.parse(await fsp.readFile(meta.infoPath, 'utf8'));
+                tags = buildId3Tags(info, source, { forceMusic: job.forceMusic, overrides: job.manualTags });
+              } catch {
+                appendEvent(job, 'Metadaten konnten nicht gelesen werden, Datei wird ohne Tags konvertiert.');
+              }
+            }
+
+            const coverPath = tags && meta && meta.thumbnailPath ? meta.thumbnailPath : null;
+
+            const mp3Path = await convertToMp3(
+              entry.full,
+              bitrate,
+              (text) => handleProcessOutput(job, 'ffmpeg', text),
+              { tags, coverPath }
+            );
+
+            const mp3Name = path.basename(mp3Path);
+
+            if (!playlistTitle && info && info.playlist_title) {
+              playlistTitle = info.playlist_title;
+            }
+
+            playlistTracks.push({
+              title: (tags && tags.title) || (info && info.title) || stripKnownExtension(entry.name),
+              artist: (tags && tags.artist) || null,
+              duration: info && typeof info.duration === 'number' ? info.duration : null,
+              fileName: mp3Name
+            });
+
+            converted.push({
+              name: mp3Name,
+              full: mp3Path
+            });
           }
 
-          job.conversionKind = 'mp3';
-          job.ffmpegMode = 'software';
-          job.conversionDurationSec = null;
-          const mp3Path = await convertToMp3(entry.full, bitrate, (text) => handleProcessOutput(job, 'ffmpeg', text));
-
-          converted.push({
-            name: path.basename(mp3Path),
-            full: mp3Path
-          });
+          entries = converted;
+        } finally {
+          for (const meta of metadataByStem.values()) {
+            if (meta.infoPath) {
+              await fsp.unlink(meta.infoPath).catch(() => {});
+            }
+            if (meta.thumbnailPath) {
+              await fsp.unlink(meta.thumbnailPath).catch(() => {});
+            }
+          }
         }
 
-        entries = converted;
+        if (entries.length > 1) {
+          const safePlaylistTitle = (playlistTitle || 'playlist').slice(0, 120);
+          const m3u8Name = `${safeBaseName(safePlaylistTitle)}.m3u8`;
+          const m3u8Path = path.join(targetDir, m3u8Name);
+          await fsp.writeFile(m3u8Path, buildM3u8Content(playlistTracks), 'utf8');
+        }
       }
 
       if (format === 'mp4') {
@@ -846,7 +1246,79 @@ app.post('/api/download', async (req, res) => {
     }
   });
 
-  res.json({ id });
+  res.json({ id, ...(freshEncryptedSession ? { encryptedSession: freshEncryptedSession } : {}) });
+});
+
+app.post('/api/sc-verify', async (req, res) => {
+  const { token } = req.body || {};
+
+  if (!token || typeof token !== 'string' || !token.trim()) {
+    return res.status(400).json({ valid: false, error: 'Kein Token angegeben.' });
+  }
+
+  const trimmedToken = token.trim();
+
+  // Schritt 1: SC REST API /me
+  let username;
+  let goPlus = false;
+  try {
+    const scRes = await fetch('https://api-v2.soundcloud.com/me', {
+      headers: { 'Authorization': `OAuth ${trimmedToken}` }
+    });
+
+    if (!scRes.ok) {
+      return res.json({ valid: false, error: 'Token ungültig oder abgelaufen.' });
+    }
+
+    const data = await scRes.json();
+    username = data.username || data.permalink || 'Unbekannt';
+    const consumerProductId = ((data.consumer_subscription || {}).product || {}).id || '';
+    goPlus = consumerProductId.includes('high-tier') || consumerProductId.includes('go');
+  } catch {
+    return res.json({ valid: false, error: 'SC-API nicht erreichbar.' });
+  }
+
+  // Schritt 2: Session-Cookie einmalig holen (für yt-dlp-Check und Response)
+  const sessionCookie = await fetchScSession(trimmedToken);
+
+  // Schritt 3: yt-dlp Duration-Check (SC_TEST_TRACK_URL hat immer einen Wert)
+  let verifyTmpDir;
+  try {
+    verifyTmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sc-verify-'));
+    const tempCookiePath = await writeTempCookieFile(verifyTmpDir, trimmedToken, sessionCookie);
+
+    const result = await runProcessCapture('yt-dlp', [
+      '--dump-json', '--no-playlist', '--no-warnings',
+      '--cookies', tempCookiePath,
+      SC_TEST_TRACK_URL
+    ]);
+
+    const info = JSON.parse(result.stdout.trim());
+    if (typeof info.duration === 'number' && info.duration <= 35) {
+      return res.json({
+        valid: false,
+        error: 'Token gültig, aber kein Zugriff auf Go+-Tracks — nur 30s-Preview verfügbar.'
+      });
+    }
+  } catch {
+    // yt-dlp-Check fehlgeschlagen → /me war erfolgreich, trotzdem valid
+  } finally {
+    if (verifyTmpDir) {
+      await fsp.rm(verifyTmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  // Schritt 4: Token + Session verschlüsseln und zurückgeben
+  const encryptedToken = encryptForClient(trimmedToken);
+  const encryptedSession = sessionCookie ? encryptForClient(sessionCookie) : undefined;
+
+  return res.json({
+    valid: true,
+    username,
+    goPlus,
+    encryptedToken,
+    ...(encryptedSession !== undefined ? { encryptedSession } : {})
+  });
 });
 
 app.get('/api/status/:id', (req, res) => {
@@ -908,6 +1380,8 @@ app.get('/health', (_req, res) => {
 });
 
 async function startServer(options = {}) {
+  getEncryptionKeyBuffer(); // wirft wenn SESSION_ENCRYPTION_KEY fehlt oder ungültig
+
   runtimeState.tmpDir = resolvePathValue(options.tmpDir || runtimeState.tmpDir);
   runtimeState.jobTtlMs = Number(options.jobTtlMs || runtimeState.jobTtlMs);
   runtimeState.runtimeChecksSkipped = options.skipRuntimeChecks ?? SKIP_RUNTIME_CHECKS;
@@ -983,11 +1457,12 @@ function logStartupSummary(port) {
 }
 
 module.exports = {
-  app,
-  startServer,
-  buildPublicClientConfig,
-  buildArgs,
-  verifyRequiredBinaries
+  app, startServer, buildPublicClientConfig, verifyRequiredBinaries,
+  detectSource, buildScArgs, buildYtArgs,
+  writeTempCookieFile, fetchScSession, encryptForClient, decryptFromClient,
+  checkScTrackFormats, buildMp3ConvertArgs,
+  collectTrackMetadata, stripKnownExtension, zipDirectory,
+  sanitizeManualTags
 };
 
 if (require.main === module) {

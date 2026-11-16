@@ -47,14 +47,160 @@
   const modeBanner = document.getElementById('modeBanner');
   const modeBannerText = document.getElementById('modeBannerText');
   const apiInfo = document.getElementById('apiInfo');
+  const settingsToggle = document.getElementById('settingsToggle');
+  const settingsModal = document.getElementById('settingsModal');
+  const settingsClose = document.getElementById('settingsClose');
+  const scTokenInput = document.getElementById('scTokenInput');
+  const scTokenSave = document.getElementById('scTokenSave');
+  const scTokenVerify = document.getElementById('scTokenVerify');
+  const scVerifyResult = document.getElementById('scVerifyResult');
+  const scBanner = document.getElementById('scBanner');
+  const scBannerTokenBtn = document.getElementById('scBannerTokenBtn');
+  const manualTaggingBox = document.getElementById('manualTaggingBox');
+  const forceMusicToggle = document.getElementById('forceMusicToggle');
+  const manualTagsPlaylistHint = document.getElementById('manualTagsPlaylistHint');
+  const manualTitle = document.getElementById('manualTitle');
+  const manualArtist = document.getElementById('manualArtist');
+  const manualAlbum = document.getElementById('manualAlbum');
+  const manualYear = document.getElementById('manualYear');
+  const manualGenre = document.getElementById('manualGenre');
 
   function createApiUrl(value) {
     return new URL(value, apiBaseUrl || window.location.origin).toString();
   }
 
+  function detectSoundCloud(url) {
+    try {
+      const hostname = new URL(url).hostname;
+      return hostname === 'soundcloud.com' || hostname.endsWith('.soundcloud.com');
+    } catch {
+      return false;
+    }
+  }
+
+  function loadEncryptedCredentials() {
+    return {
+      encryptedToken: localStorage.getItem('sc_oauth_token_enc') || '',
+      encryptedSession: localStorage.getItem('sc_session_enc') || ''
+    };
+  }
+
+  function saveEncryptedCredentials(encryptedToken, encryptedSession) {
+    localStorage.setItem('sc_oauth_token_enc', encryptedToken);
+    if (encryptedSession) {
+      localStorage.setItem('sc_session_enc', encryptedSession);
+    } else {
+      localStorage.removeItem('sc_session_enc');
+    }
+  }
+
+  function clearEncryptedCredentials() {
+    localStorage.removeItem('sc_oauth_token_enc');
+    localStorage.removeItem('sc_session_enc');
+  }
+
+  function hasStoredCredentials() {
+    return Boolean(localStorage.getItem('sc_oauth_token_enc'));
+  }
+
+  function updateUiForSource(isSoundCloud) {
+    const mp4Option = formatSelect.querySelector('option[value="mp4"]');
+    const originalOption = formatSelect.querySelector('option[value="original"]');
+
+    if (isSoundCloud) {
+      if (mp4Option) mp4Option.style.display = 'none';
+      if (originalOption) originalOption.style.display = '';
+      if (formatSelect.value === 'mp4') {
+        formatSelect.value = 'mp3';
+        fillQualityOptions('mp3');
+      }
+    } else {
+      if (mp4Option) mp4Option.style.display = '';
+      if (originalOption) originalOption.style.display = 'none';
+      if (formatSelect.value === 'original') {
+        formatSelect.value = 'mp3';
+        fillQualityOptions('mp3');
+      }
+    }
+  }
+
+  function updateScBanner() {
+    const url = document.getElementById('url').value;
+    const needsBanner = detectSoundCloud(url) && !hasStoredCredentials();
+    scBanner.classList.toggle('hidden', !needsBanner);
+  }
+
+  function isLikelyPlaylist(url) {
+    if (typeof url !== 'string' || !url.trim()) return false;
+    try {
+      const parsed = new URL(url);
+      if (parsed.searchParams.has('list')) return true;
+      return /\/sets\/|\/playlist/i.test(parsed.pathname);
+    } catch {
+      return false;
+    }
+  }
+
+  function updateManualTaggingVisibility() {
+    manualTaggingBox.classList.toggle('hidden', formatSelect.value !== 'mp3');
+
+    const url = document.getElementById('url').value;
+    const playlist = isLikelyPlaylist(url);
+    for (const field of [manualTitle, manualArtist, manualAlbum, manualYear, manualGenre]) {
+      field.disabled = playlist;
+    }
+    manualTagsPlaylistHint.classList.toggle('hidden', !playlist);
+  }
+
+  function collectManualTags(url) {
+    if (isLikelyPlaylist(url)) return null;
+
+    const fields = {
+      title: manualTitle.value.trim(),
+      artist: manualArtist.value.trim(),
+      album: manualAlbum.value.trim(),
+      year: manualYear.value.trim(),
+      genre: manualGenre.value.trim()
+    };
+
+    const manualTags = {};
+    for (const [key, value] of Object.entries(fields)) {
+      if (value) manualTags[key] = value;
+    }
+
+    return Object.keys(manualTags).length > 0 ? manualTags : null;
+  }
+
+  function openSettingsModal() {
+    settingsModal.classList.remove('hidden');
+    const hasCredentials = hasStoredCredentials();
+    scTokenInput.value = '';
+    scTokenInput.placeholder = hasCredentials ? '••••••••••••••' : '2-123456-789012345-ABCDEFGH...';
+    scTokenSave.textContent = 'Token entfernen';
+    scTokenSave.disabled = !hasCredentials;
+  }
+
+  function closeSettingsModal() {
+    settingsModal.classList.add('hidden');
+    scTokenInput.value = '';
+    scVerifyResult.textContent = '';
+    scVerifyResult.className = 'verify-result';
+  }
+
   function fillQualityOptions(format) {
     qualitySelect.innerHTML = '';
-    for (const option of qualityMap[format]) {
+
+    if (format === 'original') {
+      qualitySelect.disabled = true;
+      const el = document.createElement('option');
+      el.value = '';
+      el.textContent = '—';
+      qualitySelect.appendChild(el);
+      return;
+    }
+
+    qualitySelect.disabled = false;
+    for (const option of qualityMap[format] || []) {
       const element = document.createElement('option');
       element.value = option.value;
       element.textContent = option.label;
@@ -156,7 +302,86 @@
   }
 
   fillQualityOptions('mp3');
-  formatSelect.addEventListener('change', () => fillQualityOptions(formatSelect.value));
+  updateScBanner();
+  updateManualTaggingVisibility();
+  formatSelect.addEventListener('change', () => {
+    fillQualityOptions(formatSelect.value);
+    updateManualTaggingVisibility();
+  });
+
+  document.getElementById('url').addEventListener('input', (e) => {
+    const isSC = detectSoundCloud(e.target.value);
+    updateUiForSource(isSC);
+    updateScBanner();
+    updateManualTaggingVisibility();
+  });
+
+  settingsToggle.addEventListener('click', openSettingsModal);
+  settingsClose.addEventListener('click', closeSettingsModal);
+  settingsModal.addEventListener('click', (e) => {
+    if (e.target === settingsModal) closeSettingsModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !settingsModal.classList.contains('hidden')) closeSettingsModal();
+  });
+  scBannerTokenBtn.addEventListener('click', openSettingsModal);
+
+  scTokenSave.addEventListener('click', () => {
+    clearEncryptedCredentials();
+    scTokenInput.value = '';
+    scTokenInput.placeholder = '2-123456-789012345-ABCDEFGH...';
+    scTokenSave.disabled = true;
+    updateScBanner();
+    scVerifyResult.textContent = 'Token entfernt.';
+    scVerifyResult.className = 'verify-result ok';
+  });
+
+  scTokenVerify.addEventListener('click', async () => {
+    const token = scTokenInput.value.trim();
+    if (!token) {
+      scVerifyResult.textContent = 'Bitte zuerst einen Token eingeben.';
+      scVerifyResult.className = 'verify-result error';
+      return;
+    }
+
+    scTokenVerify.disabled = true;
+    scVerifyResult.textContent = 'Prüfe Token...';
+    scVerifyResult.className = 'verify-result pending';
+
+    try {
+      const response = await fetch(createApiUrl('/api/sc-verify'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+      if (!response.ok && response.status !== 400) {
+        throw new Error(`Server-Fehler: ${response.status}`);
+      }
+      const data = await response.json();
+
+      if (data.valid) {
+        const goLabel = data.goPlus ? ' · SC Go+: ✓' : '';
+        scVerifyResult.textContent = `✓ Token gültig · Nutzer: ${data.username}${goLabel}`;
+        scVerifyResult.className = 'verify-result ok';
+        if (data.encryptedToken) {
+          saveEncryptedCredentials(data.encryptedToken, data.encryptedSession || '');
+          scTokenInput.value = '';
+          scTokenInput.placeholder = '••••••••••••••';
+          scTokenSave.textContent = 'Token entfernen';
+          scTokenSave.disabled = false;
+          updateScBanner();
+        }
+      } else {
+        scVerifyResult.textContent = `✗ ${data.error || 'Token ungültig.'}`;
+        scVerifyResult.className = 'verify-result error';
+      }
+    } catch {
+      scVerifyResult.textContent = '✗ Verbindung zum Server fehlgeschlagen.';
+      scVerifyResult.className = 'verify-result error';
+    } finally {
+      scTokenVerify.disabled = false;
+    }
+  });
 
   if (apiBaseUrl) {
     apiInfo.textContent = `API-Ziel: ${apiBaseUrl}`;
@@ -185,18 +410,33 @@
     submitBtn.disabled = true;
 
     try {
+      const urlInput = document.getElementById('url').value;
+      const isSC = detectSoundCloud(urlInput);
+      const { encryptedToken, encryptedSession } = isSC ? loadEncryptedCredentials() : {};
+
+      const manualTags = collectManualTags(urlInput);
+
       const response = await fetch(createApiUrl('/api/download'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          url: document.getElementById('url').value,
+          url: urlInput,
           format: formatSelect.value,
-          quality: qualitySelect.value
+          quality: qualitySelect.value,
+          forceMusic: forceMusicToggle.checked,
+          ...(manualTags ? { manualTags } : {}),
+          ...(encryptedToken ? { encryptedToken } : {}),
+          ...(encryptedSession ? { encryptedSession } : {})
         })
       });
 
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Download konnte nicht gestartet werden.');
+
+      if (data.encryptedSession && encryptedToken) {
+        saveEncryptedCredentials(encryptedToken, data.encryptedSession);
+      }
+
       await pollStatus(data.id);
     } catch (error) {
       stateText.innerHTML = `<span class="error">${error.message}</span>`;
@@ -204,4 +444,8 @@
       submitBtn.disabled = false;
     }
   });
+
+  if (hasStoredCredentials()) {
+    scTokenInput.placeholder = '••••••••••••••';
+  }
 }());
