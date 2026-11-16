@@ -22,3 +22,9 @@
 - 65 Unit-/Helper-Tests, Smoke-Test, Demo-Build, Release-Build und API-Mock-Tests lokal erfolgreich.
 - Gitea-Lauf #6 scheiterte vor Tests am defekten setup-node-Action-Cache (fehlende .licenses/npm/agent-base.dep.yml). Node-Jobs nutzen jetzt reproduzierbar node:22-bookworm als Job-Container statt setup-node.
 - Wiki: vier Projektseiten angelegt, drei Betriebsseiten ausgefüllt, Projektindex ergänzt.
+
+## Checkpoint — Gitea erfolgreich
+- PR #4: https://git.scholz-cloud.de/Scholz/yt-dlp-webui/pulls/4.
+- Gitea-CI #8 auf 93bb5af erfolgreich: npm ci, komplette Verifikation, Server-ZIP und Release-API-Mock-Tests.
+- Qualitätsfix hat Regressionstests; kein Live-YouTube-Download. Registry-/Release-Publishing bewusst nur konfiguriert, nicht ausgelöst.
+- Wiki-Projekt/Betrieb vollständig dokumentiert. Nächster Schritt: PR nach finalem grünen Lauf integrieren, Issues #1/#3 schließen, veralteten WIP #2 schließen. Produktivimage bleibt unverändert; Deployment separat manuell.
