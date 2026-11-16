@@ -63,7 +63,7 @@ test('enthält --js-runtimes deno', () => {
   assert.ok(args.includes('--js-runtimes'));
   assert.ok(args.includes('deno'));
 });
-test('enthält extractor-args youtube', () => {
+test('automatic YouTube client selection', () => {
   const args = buildYtArgs({ url: 'https://youtube.com/watch?v=x', format: 'mp3', quality: '320', targetDir: '/tmp/x' });
   assert.ok(!args.includes('--extractor-args'));
 });

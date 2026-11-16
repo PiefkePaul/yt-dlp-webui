@@ -17,3 +17,8 @@
 ## Checkpoint — Gitea-Hauptbranch integriert
 - Gitea main b4f9608 enthält zusätzliche SoundCloud-/Metadatenfunktionen und Unit-Tests gegenüber lokalem Altstand; vollständig übernommen. Konflikte in server.js, package.json und Smoke-Test gelöst; Qualitätsfix in buildYtArgs portiert.
 - PR #4 erstellt; erster CI-Lauf prüfte noch den Altstand. Neuprüfung erfolgt nach Merge des Hauptbranches.
+
+## Checkpoint — vollständige Tests und Runner-Fix
+- 65 Unit-/Helper-Tests, Smoke-Test, Demo-Build, Release-Build und API-Mock-Tests lokal erfolgreich.
+- Gitea-Lauf #6 scheiterte vor Tests am defekten setup-node-Action-Cache (fehlende .licenses/npm/agent-base.dep.yml). Node-Jobs nutzen jetzt reproduzierbar node:22-bookworm als Job-Container statt setup-node.
+- Wiki: vier Projektseiten angelegt, drei Betriebsseiten ausgefüllt, Projektindex ergänzt.
